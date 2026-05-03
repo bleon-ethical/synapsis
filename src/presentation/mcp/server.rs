@@ -18,6 +18,7 @@ use crate::tools::env_detection::handle_env_detection;
 use crate::tools::os_search::mcp_tools as os_search_tools;
 use crate::tools::security_classify::mcp_tools as security_classify_tools;
 use crate::tools::web_research::mcp_tools as web_research_tools;
+use crate::plugins::feasibility_analyzer::mcp_tools as feasibility_tools;
 
 // Plugins
 use crate::plugins::remote_control::mcp_tools as remote_control_tools;
@@ -610,7 +611,12 @@ impl McpServer {
                      { "name": "plugin_cleanup", "description": "Cleanup unused plugins", "inputSchema": { "type": "object", "properties": { "max_age_seconds": { "type": "integer" } } } },
 
                      // System Health
-                     { "name": "db_health", "description": "Database health metrics and saturation status", "inputSchema": { "type": "object", "properties": {} } }
+                     { "name": "db_health", "description": "Database health metrics and saturation status", "inputSchema": { "type": "object", "properties": {} } },
+
+                     // Feasibility Analyzer
+                     { "name": "feasibility_analyze", "description": "Transform a vague idea into structured feasibility assessment with complexity, viability, risks, requirements, and next steps", "inputSchema": { "type": "object", "properties": { "idea": { "type": "string", "description": "The idea or concept to analyze" }, "domain": { "type": "string", "description": "Domain/industry (e.g. AI, security, devtools)" }, "budget": { "type": "string" }, "timeline": { "type": "string" } }, "required": ["idea"] } },
+                     { "name": "market_trends", "description": "Research current market trends and competitive landscape for a domain", "inputSchema": { "type": "object", "properties": { "domain": { "type": "string" }, "keywords": { "type": "string" } }, "required": ["domain"] } },
+                     { "name": "tech_plan", "description": "Generate a phased technical execution plan with milestones, team config, and go/no-go criteria", "inputSchema": { "type": "object", "properties": { "idea": { "type": "string" }, "team_size": { "type": "integer" } } } }
                 ]
             }
         }))
@@ -742,6 +748,9 @@ impl McpServer {
             "plugin_update_check" => self.action_plugin_update_check(args),
             "plugin_cleanup" => self.action_plugin_cleanup(args),
             "db_health" => self.action_db_health(args),
+            "feasibility_analyze" => self.action_feasibility_analyze(args),
+            "market_trends" => self.action_market_trends(args),
+            "tech_plan" => self.action_tech_plan(args),
 
             _ => Err(format!("Unknown tool: {}", name)),
         };
@@ -1644,6 +1653,18 @@ impl McpServer {
 
     fn action_db_health(&self, _args: &Value) -> Result<Value, String> {
         Ok(self.db.db_health())
+    }
+
+    fn action_feasibility_analyze(&self, args: &Value) -> Result<Value, String> {
+        feasibility_tools::handle_feasibility_analyze(args)
+    }
+
+    fn action_market_trends(&self, args: &Value) -> Result<Value, String> {
+        feasibility_tools::handle_market_trends(args)
+    }
+
+    fn action_tech_plan(&self, args: &Value) -> Result<Value, String> {
+        feasibility_tools::handle_tech_plan(args)
     }
 
     fn action_connection_status(&self, _args: &Value) -> Result<Value, String> {
