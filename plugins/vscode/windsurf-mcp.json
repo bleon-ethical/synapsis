@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "synapsis": {
+      "type": "stdio",
+      "command": "synapsis",
+      "args": ["mcp"],
+      "env": {
+        "SYNAPSIS_PROJECT": "${workspaceFolder}"
+      }
+    }
+  }
+}

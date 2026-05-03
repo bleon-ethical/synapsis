@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+Cargo.lock
+.env
+*.log
+*.log.*
+logs/
+*.db
+*.db-*
+*.db.*
+synapsis.db*
+!*.json

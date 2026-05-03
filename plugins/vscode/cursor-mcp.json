@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "synapsis": {
+      "command": "synapsis",
+      "args": ["mcp"],
+      "enabled": true,
+      "autoStart": true
+    }
+  }
+}
