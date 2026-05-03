@@ -607,7 +607,10 @@ impl McpServer {
                     { "name": "plugin_enable", "description": "Enable/disable plugin", "inputSchema": { "type": "object", "properties": { "plugin_id": { "type": "string" }, "enabled": { "type": "boolean" } }, "required": ["plugin_id"] } },
                     { "name": "plugin_health", "description": "Plugin health check", "inputSchema": { "type": "object", "properties": { "plugin_id": { "type": "string" } } } },
                     { "name": "plugin_update_check", "description": "Check for updates", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "plugin_cleanup", "description": "Cleanup unused plugins", "inputSchema": { "type": "object", "properties": { "max_age_seconds": { "type": "integer" } } } }
+                     { "name": "plugin_cleanup", "description": "Cleanup unused plugins", "inputSchema": { "type": "object", "properties": { "max_age_seconds": { "type": "integer" } } } },
+
+                     // System Health
+                     { "name": "db_health", "description": "Database health metrics and saturation status", "inputSchema": { "type": "object", "properties": {} } }
                 ]
             }
         }))
@@ -738,6 +741,7 @@ impl McpServer {
             "plugin_health" => self.action_plugin_health(args),
             "plugin_update_check" => self.action_plugin_update_check(args),
             "plugin_cleanup" => self.action_plugin_cleanup(args),
+            "db_health" => self.action_db_health(args),
 
             _ => Err(format!("Unknown tool: {}", name)),
         };
@@ -1636,6 +1640,10 @@ impl McpServer {
         let max_age = args["max_age_seconds"].as_i64().unwrap_or(86400);
         let removed = self.plugin_manager.cleanup_unused_plugins(max_age);
         Ok(json!({ "removed": removed }))
+    }
+
+    fn action_db_health(&self, _args: &Value) -> Result<Value, String> {
+        Ok(self.db.db_health())
     }
 
     fn action_connection_status(&self, _args: &Value) -> Result<Value, String> {
