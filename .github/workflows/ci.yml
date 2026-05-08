@@ -45,17 +45,17 @@ jobs:
         working-directory: synapsis
         run: cargo fmt --all -- --check
 
-      - name: Clippy lint
+      - name: Clippy
         working-directory: synapsis
-        run: cargo clippy --all-targets --all-features -- -D warnings 2>&1 || echo "::warning::Clippy warnings found (non-blocking)"
+        run: cargo clippy --all-targets
 
       - name: Compile check
         working-directory: synapsis
-        run: cargo check --all-targets --all-features
+        run: cargo check --all-targets
 
       - name: Run tests
         working-directory: synapsis
-        run: cargo test --all-features --lib
+        run: cargo test --lib
 
       - name: Security audit
         working-directory: synapsis
@@ -63,7 +63,7 @@ jobs:
           if ! command -v cargo-audit &> /dev/null; then
             cargo install cargo-audit --locked
           fi
-          cargo audit --deny warnings 2>&1 || echo "::warning::Cargo audit found advisories"
+          cargo audit
 
   build:
     name: Build (${{ matrix.name }})
