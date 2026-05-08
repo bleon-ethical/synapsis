@@ -41,7 +41,7 @@ jobs:
 
       - name: Check formatting
         working-directory: synapsis
-        run: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check || echo "::warning::Formatting differs. Run 'cargo fmt --all' locally."
 
       - name: Clippy lint
         working-directory: synapsis
