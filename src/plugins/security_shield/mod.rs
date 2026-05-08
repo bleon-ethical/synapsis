@@ -80,9 +80,8 @@ pub struct DefenseRule {
     pub hit_count: u32,
     pub last_hit: Option<i64>,
 }
-
 /// Global state - initialized via lazy_static above
-
+///
 /// Initialize default defense rules
 pub fn init_default_rules() {
     let mut rules = DEFENSE_RULES.lock().unwrap_or_else(|e| e.into_inner());
@@ -425,7 +424,7 @@ pub fn monitor_network() -> Result<Value> {
 
     // Get active connections (simplified - uses ss/netstat)
     let output = std::process::Command::new("ss")
-        .args(&["-tunp"])
+        .args(["-tunp"])
         .output()
         .ok();
 
@@ -521,7 +520,7 @@ pub fn detect_lateral_movement() -> Result<Value> {
 
     // Check for SMB connections
     if let Ok(out) = std::process::Command::new("ss")
-        .args(&["-tunp", "sport", "=", "445"])
+        .args(["-tunp", "sport", "=", "445"])
         .output()
     {
         let stdout = String::from_utf8_lossy(&out.stdout);
@@ -538,7 +537,7 @@ pub fn detect_lateral_movement() -> Result<Value> {
 
     // Check for WMI/RPC connections
     if let Ok(out) = std::process::Command::new("ss")
-        .args(&["-tunp", "sport", "=", "135"])
+        .args(["-tunp", "sport", "=", "135"])
         .output()
     {
         let stdout = String::from_utf8_lossy(&out.stdout);
@@ -553,7 +552,7 @@ pub fn detect_lateral_movement() -> Result<Value> {
 
     // Check for recent auth failures (possible credential stuffing)
     if let Ok(out) = std::process::Command::new("journalctl")
-        .args(&[
+        .args([
             "-u",
             "sshd",
             "--since",
@@ -605,7 +604,7 @@ pub fn detect_gap_attacks() -> Result<Value> {
 
     // Check for USB device connections
     if let Ok(out) = std::process::Command::new("dmesg")
-        .args(&["--time-format", "iso", "--level", "info"])
+        .args(["--time-format", "iso", "--level", "info"])
         .output()
     {
         let stdout = String::from_utf8_lossy(&out.stdout);

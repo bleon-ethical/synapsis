@@ -149,7 +149,7 @@ impl ResilienceManager {
         let mut removed = 0;
 
         for backup in backups.iter().skip(self.max_backups) {
-            if let Err(_) = fs::remove_file(&backup.path) {
+            if fs::remove_file(&backup.path).is_err() {
                 // Try to remove redundant copies too
                 let _ = fs::remove_file(format!("{}.1", backup.path.display()));
                 let _ = fs::remove_file(format!("{}.2", backup.path.display()));
@@ -167,7 +167,7 @@ impl ResilienceManager {
 
     /// Set redundancy level (1-5)
     pub fn set_redundancy_level(&mut self, level: u8) -> Result<(), String> {
-        if level < 1 || level > 5 {
+        if !(1..=5).contains(&level) {
             return Err("Redundancy level must be between 1 and 5".to_string());
         }
         self.redundancy_level = level;

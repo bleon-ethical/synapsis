@@ -1,8 +1,6 @@
 //! SQLCipher performance benchmark
 //! Measures overhead of encryption compared to plain SQLite.
 
-use hex;
-use rand;
 use std::time::Instant;
 use synapsis::infrastructure::database::Database;
 use synapsis::StoragePort;

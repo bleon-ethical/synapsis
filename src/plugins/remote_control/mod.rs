@@ -108,9 +108,8 @@ pub struct SelfHealRule {
     pub last_triggered: Option<i64>,
     pub trigger_count: u32,
 }
-
 /// Global state - initialized via lazy_static above
-
+///
 /// Register this agent
 pub fn agent_register(agent_id: &str, name: &str, capabilities: Vec<String>) -> Result<Value> {
     let now = SystemTime::now()
@@ -715,7 +714,7 @@ fn evaluate_heal_condition(condition: &str) -> Result<bool> {
                 if let Some(line) = stdout.lines().nth(1) {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if let Some(usage) = parts.get(4) {
-                        if let Some(pct) = usage.trim_end_matches('%').parse::<u32>().ok() {
+                        if let Ok(pct) = usage.trim_end_matches('%').parse::<u32>() {
                             return Ok(pct > 90);
                         }
                     }
@@ -767,7 +766,7 @@ fn perform_heal_action(action: &str) -> Result<Value> {
         "clear_tmp" => {
             // Clear old temp files
             let _ = Command::new("find")
-                .args(&["/tmp", "-mtime", "+1", "-delete"])
+                .args(["/tmp", "-mtime", "+1", "-delete"])
                 .output();
             Ok(json!({"action": "clear_tmp", "status": "done"}))
         }
@@ -776,7 +775,7 @@ fn perform_heal_action(action: &str) -> Result<Value> {
             let services = ["anydesk", "synapsis-mcp"];
             for svc in services {
                 let _ = Command::new("sudo")
-                    .args(&["systemctl", "restart", svc])
+                    .args(["systemctl", "restart", svc])
                     .output();
             }
             Ok(json!({"action": "restart_services", "status": "done"}))

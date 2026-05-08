@@ -1001,7 +1001,7 @@ impl McpServer {
             .map_err(|e| format!("Encryption failed: {}", e))?;
         Ok(json!({
             "ciphertext": hex::encode(&ciphertext),
-            "key": hex::encode(&key),
+            "key": hex::encode(key),
             "algorithm": "AES-256-GCM"
         }))
     }

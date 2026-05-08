@@ -114,7 +114,7 @@ impl AntiTamperingManager {
         };
 
         if !exists {
-            self.send_alert(path, &checksum, &vec![], AlertSeverity::Critical);
+            self.send_alert(path, &checksum, &[], AlertSeverity::Critical);
             return Ok(false);
         }
 

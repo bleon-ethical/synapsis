@@ -24,6 +24,7 @@ fn get_html(tab: &headless_chrome::Tab) -> Result<String> {
     }
 }
 
+#[allow(unused_variables)]
 pub fn navigate_to_url(url: &str) -> Result<String> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow::anyhow!("Browser feature not enabled."));
@@ -86,6 +87,7 @@ mod tests {
 }
 
 /// Extract text content from elements matching a CSS selector.
+#[allow(unused_variables)]
 pub fn extract_text(url: &str, selector: &str) -> Result<Vec<String>> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow::anyhow!("Browser feature not enabled."));
@@ -135,6 +137,7 @@ pub fn extract_text(url: &str, selector: &str) -> Result<Vec<String>> {
 }
 
 /// Click an element matching a CSS selector.
+#[allow(unused_variables)]
 pub fn click_element(url: &str, selector: &str) -> Result<()> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow::anyhow!("Browser feature not enabled."));
@@ -178,6 +181,7 @@ pub fn click_element(url: &str, selector: &str) -> Result<()> {
 }
 
 /// Fill a form field (input, textarea) matching a CSS selector with a value.
+#[allow(unused_variables)]
 pub fn fill_form(url: &str, selector: &str, value: &str) -> Result<()> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow::anyhow!("Browser feature not enabled."));
@@ -218,6 +222,7 @@ pub fn fill_form(url: &str, selector: &str, value: &str) -> Result<()> {
 }
 
 /// Take a screenshot of the current page and save it to a file.
+#[allow(unused_variables)]
 pub fn screenshot(url: &str, output_path: &str) -> Result<()> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow::anyhow!("Browser feature not enabled."));

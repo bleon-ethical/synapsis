@@ -21,6 +21,12 @@ pub struct KufaleEngine {
     pub target_gregorian: NaiveDate, // 2027-10-10
 }
 
+impl Default for KufaleEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KufaleEngine {
     pub fn new() -> Self {
         Self {

@@ -34,7 +34,7 @@ impl TestContext {
         println!("[TEST_CONTEXT] Creating test directory: {}", test_dir);
         let _ = std::io::stdout().flush();
         let db_path = format!("{}/synapsis/synapsis.db", test_dir);
-        std::fs::create_dir_all(&format!("{}/synapsis", test_dir)).ok();
+        std::fs::create_dir_all(format!("{}/synapsis", test_dir)).ok();
 
         println!("[TEST_CONTEXT] Creating Database instance at {}", db_path);
         let _ = std::io::stdout().flush();

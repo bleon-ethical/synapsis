@@ -131,8 +131,13 @@ fn interactive_chat(model: &str) {
 fn mcp_mode() {
     println!("MCP mode - reading from stdin...");
     let stdin = io::stdin();
-    for line in stdin.lock().lines().flatten() {
-        // Process MCP request
-        println!("{{\"result\": \"processed: {}\"}}", line);
+    for line in stdin.lock().lines() {
+        match line {
+            Ok(line) => println!("{{\"result\": \"processed: {}\"}}", line),
+            Err(e) => {
+                eprintln!("Error reading stdin: {}", e);
+                break;
+            }
+        }
     }
 }

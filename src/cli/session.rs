@@ -6,7 +6,7 @@
 use crate::core::session_id::{SessionId, SessionRegistry};
 use std::sync::{Arc, RwLock};
 
-/// Global session registry
+// Global session registry
 lazy_static::lazy_static! {
     static ref SESSION_REGISTRY: Arc<RwLock<SessionRegistry>> =
         Arc::new(RwLock::new(SessionRegistry::new()));

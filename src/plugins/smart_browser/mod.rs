@@ -73,6 +73,7 @@ impl SmartSession {
 }
 
 /// Navigate to URL and analyze page like a human would
+#[allow(unused_variables)]
 pub fn smart_navigate(session_id: &str, url: &str, wait_seconds: u64) -> Result<Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -142,6 +143,7 @@ pub fn smart_navigate(session_id: &str, url: &str, wait_seconds: u64) -> Result<
 }
 
 /// Find elements intelligently (by text, role, context - like a human looking for something)
+#[allow(unused_variables)]
 pub fn smart_find_element(
     session_id: &str,
     search_query: &str,
@@ -213,6 +215,7 @@ pub fn smart_find_element(
 }
 
 /// Click element intelligently (waits for navigation, handles popups)
+#[allow(unused_variables)]
 pub fn smart_click(session_id: &str, selector: &str) -> Result<Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -297,6 +300,7 @@ pub fn smart_click(session_id: &str, selector: &str) -> Result<Value> {
 }
 
 /// Fill form field intelligently (finds by label, placeholder, or name)
+#[allow(unused_variables)]
 pub fn smart_fill(session_id: &str, field_description: &str, value: &str) -> Result<Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -400,6 +404,7 @@ pub fn smart_fill(session_id: &str, field_description: &str, value: &str) -> Res
 }
 
 /// Submit form intelligently
+#[allow(unused_variables)]
 pub fn smart_submit(session_id: &str) -> Result<Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -507,6 +512,7 @@ pub fn smart_submit(session_id: &str) -> Result<Value> {
 }
 
 /// Take screenshot and analyze page (for debugging/decision making)
+#[allow(unused_variables)]
 pub fn smart_screenshot(session_id: &str, output_path: &str) -> Result<Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));

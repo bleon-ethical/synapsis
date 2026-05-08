@@ -141,6 +141,8 @@ fn load_cookies_from_file(tab: &Tab, session_id: &str) -> Result<()> {
 }
 
 /// Navigate to URL with authentication, performing login if needed
+#[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn auth_navigate(
     url: &str,
     session_id: &str,
@@ -270,6 +272,7 @@ pub fn auth_navigate(
 }
 
 /// Take a screenshot within authenticated session
+#[allow(unused_variables)]
 pub fn auth_screenshot(
     session_id: &str,
     output_path: &str,
@@ -315,6 +318,8 @@ pub fn auth_screenshot(
 }
 
 /// Login, navigate and extract visible text in ONE operation (for SPAs like Netacad)
+#[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn auth_login_and_extract(
     url: &str,
     session_id: &str,
@@ -361,7 +366,7 @@ pub fn auth_login_and_extract(
 
                 // Check if we were redirected to an SSO page - look for actual input fields
                 let check_inputs = "JSON.stringify(Array.from(document.querySelectorAll('input[type=\"text\"], input[type=\"email\"], input[name=\"username\"], input[name=\"email\"])).map(i => ({id: i.id, name: i.name, type: i.type, classes: i.className})))";
-                let inputs_json = tab
+                let _inputs_json = tab
                     .evaluate(check_inputs, false)
                     .ok()
                     .and_then(|r| r.value)
@@ -512,6 +517,7 @@ pub fn auth_login_and_extract(
 }
 
 /// Extract visible text content from an authenticated session (rendered text, not HTML)
+#[allow(unused_variables)]
 pub fn auth_extract_text(session_id: &str, wait_seconds: u64) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -570,6 +576,7 @@ pub fn auth_extract_text(session_id: &str, wait_seconds: u64) -> Result<serde_js
 }
 
 /// Extract content from authenticated session
+#[allow(unused_variables)]
 pub fn auth_extract(session_id: &str, selector: &str) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -628,6 +635,7 @@ pub fn auth_extract(session_id: &str, selector: &str) -> Result<serde_json::Valu
 }
 
 /// Navigate within an authenticated session
+#[allow(unused_variables)]
 pub fn auth_navigate_session(session_id: &str, url: &str) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -747,6 +755,7 @@ fn get_html(tab: &Tab) -> Result<String> {
 pub mod mcp_tools {
     use super::*;
 
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_auth_navigate(
         url: &str,
         session_id: &str,
@@ -789,6 +798,7 @@ pub mod mcp_tools {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_auth_login_and_extract(
         url: &str,
         session_id: &str,

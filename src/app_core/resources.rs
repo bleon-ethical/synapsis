@@ -213,6 +213,6 @@ mod tests {
     fn test_throttle_delay() {
         let monitor = ResourceMonitor::new();
         let delay = monitor.throttle_delay();
-        assert!(delay.as_millis() >= 0);
+        assert!(delay.as_millis() > 0);
     }
 }

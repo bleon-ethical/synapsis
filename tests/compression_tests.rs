@@ -72,7 +72,7 @@ fn test_compression_level_ratios() {
 
 #[test]
 fn test_content_tier() {
-    let tiers = vec![
+    let tiers = [
         ContentTier::Essential,
         ContentTier::Standard,
         ContentTier::OnDemand,
@@ -325,7 +325,7 @@ fn test_monitor_alerts_none_when_ok() {
 
 #[test]
 fn test_alert_types() {
-    let types = vec![
+    let types = [
         AlertType::HighUsage,
         AlertType::CompressionNeeded,
         AlertType::ContextOverflow,

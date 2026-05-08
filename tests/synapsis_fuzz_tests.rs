@@ -30,7 +30,7 @@ impl TestContext {
         println!("[TEST_CONTEXT] Creating test directory: {}", test_dir);
         let _ = std::io::stdout().flush();
         let db_path = format!("{}/synapsis/synapsis.db", test_dir);
-        std::fs::create_dir_all(&format!("{}/synapsis", test_dir)).ok();
+        std::fs::create_dir_all(format!("{}/synapsis", test_dir)).ok();
 
         println!("[TEST_CONTEXT] Creating Database instance at {}", db_path);
         let _ = std::io::stdout().flush();
@@ -586,7 +586,7 @@ fn test_unicode_normalization() {
     let ctx = TestContext::new();
     let db = ctx.db();
 
-    let unicode_forms = vec![
+    let unicode_forms = [
         " café",    // combining accent
         " café",    // precomposed
         "\u{00E9}", // codepoint

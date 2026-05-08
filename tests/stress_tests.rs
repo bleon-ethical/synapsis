@@ -31,7 +31,7 @@ fn stress_concurrent_observations() {
         handles.push(std::thread::spawn(move || {
             for i in 0..10 {
                 let obs = Observation::new(
-                    SessionId::new(&format!("agent-{}-session", agent_id)),
+                    SessionId::new(format!("agent-{}-session", agent_id)),
                     ObservationType::Bugfix,
                     format!("Agent {} Bug Fix {}", agent_id, i),
                     format!("Content from agent {} observation {}", agent_id, i),
@@ -93,11 +93,10 @@ fn stress_deduplication_race() {
 
         handles.push(std::thread::spawn(move || {
             for _ in 0..10 {
-                let id = storage.save_observation(&obs);
-                if id.is_ok() {
+                if let Ok(id) = storage.save_observation(&obs) {
                     counter.fetch_add(1, Ordering::Relaxed);
                     let mut guard = ids.lock().unwrap();
-                    guard.push(id.unwrap());
+                    guard.push(id);
                 }
             }
         }));
