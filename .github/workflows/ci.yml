@@ -24,11 +24,13 @@ jobs:
         with:
           repository: MethodWhite/synapsis-core
           path: synapsis-core
+          ref: clean
 
       - uses: actions/checkout@v6
         with:
           repository: MethodWhite/prusia-vault
           path: prusia-vault
+          ref: main
 
       - uses: dtolnay/rust-toolchain@v1
         with:
@@ -105,11 +107,13 @@ jobs:
         with:
           repository: MethodWhite/synapsis-core
           path: synapsis-core
+          ref: clean
 
       - uses: actions/checkout@v6
         with:
           repository: MethodWhite/prusia-vault
           path: prusia-vault
+          ref: main
 
       - uses: dtolnay/rust-toolchain@v1
         with:
