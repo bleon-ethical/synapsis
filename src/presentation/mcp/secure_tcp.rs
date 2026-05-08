@@ -94,12 +94,15 @@ fn handle_secure_connection(
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
 
-    // Use shared_secret as AES key (first 32 bytes)
+    // Derive AES key using HKDF-SHA256 (replaces insecure truncation)
     let mut aes_key = [0u8; 32];
     if shared_secret.len() >= 32 {
-        aes_key.copy_from_slice(&shared_secret[..32]);
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(b"synapsis-kyber-kdf-v1");
+        hasher.update(&shared_secret);
+        aes_key.copy_from_slice(&hasher.finalize()[..32]);
     } else {
-        // Pad with zeros (should not happen with Kyber512)
         let len = shared_secret.len();
         aes_key[..len].copy_from_slice(&shared_secret);
     }
@@ -162,61 +165,54 @@ fn handle_secure_connection(
     Ok(())
 }
 
-/// Perform Kyber key exchange handshake
+/// Perform Kyber key exchange handshake (standard KEM flow)
+///
+/// Protocol:
+///   1. Server generates ephemeral keypair
+///   2. Server sends public key to client (base64, one line)
+///   3. Client reads server PK, encapsulates to it, sends ciphertext back (base64, one line)
+///   4. Server decapsulates ciphertext to recover shared secret
+///
+/// Returns the 32-byte shared secret for AES-256-GCM encryption.
 fn perform_kyber_handshake(
     crypto_provider: &dyn CryptoProvider,
     stream: &TcpStream,
 ) -> Result<Vec<u8>, String> {
-    // Generate server keypair
     let (server_pk, server_sk) = crypto_provider
         .generate_keypair(PqcAlgorithm::Kyber512)
         .map_err(|e| format!("Failed to generate server keypair: {}", e))?;
 
-    // Read client public key (first line)
-    let mut reader = BufReader::new(
-        stream
-            .try_clone()
-            .map_err(|e| format!("Clone stream: {}", e))?,
-    );
-    let mut client_pk_line = String::new();
-    reader
-        .read_line(&mut client_pk_line)
-        .map_err(|e| format!("Read client public key: {}", e))?;
-    let client_pk_line = client_pk_line.trim();
-
-    // Decode client public key (base64)
-    let client_pk = general_purpose::STANDARD
-        .decode(client_pk_line)
-        .map_err(|e| format!("Decode client public key: {}", e))?;
-
-    // Encapsulate shared secret using client's public key
-    let (ciphertext, shared_secret) = crypto_provider
-        .encapsulate(&client_pk, PqcAlgorithm::Kyber512)
-        .map_err(|e| format!("Encapsulate shared secret: {}", e))?;
-
-    // Send server public key and ciphertext to client (one line, space separated)
+    // Step 1: Send server public key to client
     let mut writer = stream
         .try_clone()
         .map_err(|e| format!("Clone stream for write: {}", e))?;
-    let response = format!(
-        "{} {}\n",
-        general_purpose::STANDARD.encode(&server_pk),
-        general_purpose::STANDARD.encode(&ciphertext)
-    );
-    writer
-        .write_all(response.as_bytes())
-        .map_err(|e| format!("Write handshake response: {}", e))?;
+    let server_pk_b64 = general_purpose::STANDARD.encode(&server_pk);
+    writeln!(writer, "{}", server_pk_b64)
+        .map_err(|e| format!("Write server public key: {}", e))?;
     writer
         .flush()
-        .map_err(|e| format!("Flush handshake response: {}", e))?;
+        .map_err(|e| format!("Flush server public key: {}", e))?;
 
-    // Server also needs to derive shared secret from client's ciphertext? Wait.
-    // Actually, in Kyber, the client encapsulates to server's public key.
-    // But we are doing opposite: client sends its public key, server encapsulates.
-    // That's fine: shared secret is derived from client's public key and server's secret key.
-    // We already have shared_secret from encapsulate.
-    // Client will decapsulate using its secret key and received ciphertext.
-    // Need to ensure client knows to send its public key first.
+    // Step 2: Read client's ciphertext
+    let mut reader = BufReader::new(
+        stream
+            .try_clone()
+            .map_err(|e| format!("Clone stream for read: {}", e))?,
+    );
+    let mut ciphertext_line = String::new();
+    reader
+        .read_line(&mut ciphertext_line)
+        .map_err(|e| format!("Read client ciphertext: {}", e))?;
+    let ciphertext_line = ciphertext_line.trim().to_string();
+
+    let ciphertext = general_purpose::STANDARD
+        .decode(&ciphertext_line)
+        .map_err(|e| format!("Decode client ciphertext: {}", e))?;
+
+    // Step 3: Decapsulate shared secret using server secret key
+    let shared_secret = crypto_provider
+        .decapsulate(&ciphertext, &server_sk, PqcAlgorithm::Kyber512)
+        .map_err(|e| format!("Decapsulate shared secret: {}", e))?;
 
     Ok(shared_secret)
 }
@@ -303,59 +299,48 @@ impl SecureTcpClient {
     }
 }
 
-/// Perform client-side Kyber handshake
+/// Perform client-side Kyber handshake (standard KEM flow)
+///
+/// Protocol:
+///   1. Read server's public key (base64, one line)
+///   2. Client encapsulates shared secret to server's PK
+///   3. Client sends ciphertext to server (base64, one line)
+///
+/// Returns the 32-byte shared secret for AES-256-GCM encryption.
 fn perform_client_handshake(
     crypto_provider: &dyn CryptoProvider,
     stream: &TcpStream,
 ) -> Result<Vec<u8>, String> {
-    // Generate client keypair
-    let (client_pk, client_sk) = crypto_provider
-        .generate_keypair(PqcAlgorithm::Kyber512)
-        .map_err(|e| format!("Failed to generate client keypair: {}", e))?;
-
-    // Send client public key
-    let mut writer = stream
-        .try_clone()
-        .map_err(|e| format!("Clone stream for write: {}", e))?;
-    writeln!(writer, "{}", general_purpose::STANDARD.encode(&client_pk))
-        .map_err(|e| format!("Send client public key: {}", e))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Flush client public key: {}", e))?;
-
-    // Read server response (public key + ciphertext)
+    // Step 1: Read server public key
     let mut reader = BufReader::new(
         stream
             .try_clone()
             .map_err(|e| format!("Clone stream for read: {}", e))?,
     );
-    let mut response_line = String::new();
+    let mut server_pk_line = String::new();
     reader
-        .read_line(&mut response_line)
-        .map_err(|e| format!("Read server response: {}", e))?;
-    let response_line = response_line.trim();
+        .read_line(&mut server_pk_line)
+        .map_err(|e| format!("Read server public key: {}", e))?;
+    let server_pk_line = server_pk_line.trim();
 
-    // Parse server public key and ciphertext
-    let parts: Vec<&str> = response_line.split_whitespace().collect();
-    if parts.len() != 2 {
-        return Err("Invalid server response format".to_string());
-    }
     let server_pk = general_purpose::STANDARD
-        .decode(parts[0])
+        .decode(server_pk_line)
         .map_err(|e| format!("Decode server public key: {}", e))?;
-    let ciphertext = general_purpose::STANDARD
-        .decode(parts[1])
-        .map_err(|e| format!("Decode ciphertext: {}", e))?;
 
-    // Client decapsulates shared secret using its secret key and ciphertext
-    // Actually, in our protocol, server encapsulated to client's public key.
-    // Client needs to decapsulate using its secret key and the ciphertext.
-    // But we didn't send ciphertext yet? Wait, server sent ciphertext.
-    // The ciphertext is from server's encapsulation using client's public key.
-    // So client decapsulates using its secret key and ciphertext.
-    let shared_secret = crypto_provider
-        .decapsulate(&ciphertext, &client_sk, PqcAlgorithm::Kyber512)
-        .map_err(|e| format!("Decapsulate shared secret: {}", e))?;
+    // Step 2: Encapsulate shared secret using server's public key
+    let (ciphertext, shared_secret) = crypto_provider
+        .encapsulate(&server_pk, PqcAlgorithm::Kyber512)
+        .map_err(|e| format!("Encapsulate shared secret: {}", e))?;
+
+    // Step 3: Send ciphertext to server
+    let mut writer = stream
+        .try_clone()
+        .map_err(|e| format!("Clone stream for write: {}", e))?;
+    writeln!(writer, "{}", general_purpose::STANDARD.encode(&ciphertext))
+        .map_err(|e| format!("Send ciphertext: {}", e))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Flush ciphertext: {}", e))?;
 
     Ok(shared_secret)
 }

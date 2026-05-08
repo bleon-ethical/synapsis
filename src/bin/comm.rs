@@ -127,24 +127,20 @@ fn broadcast_message(
 
     let db = Database::new();
 
-    let event_id = db
-        .broadcast_event(
-            "cli_message",
-            session_id,
-            project,
-            channel,
-            &format!(
-                r#"{{"type":"cli_message","content":"{}"}}"#,
-                message.replace('"', "\\\"")
-            ),
-            priority,
-        )
-        .unwrap_or(0);
-
-    println!(
-        "✓ Broadcast sent (event_id: {}, channel: '{}')",
-        event_id, channel
-    );
+    let _event_id = match db.broadcast_event(
+        "cli_message", session_id, project, channel,
+        &format!(r#"{{"type":"cli_message","content":"{}"}}"#, message.replace('"', "\\\"")),
+        priority,
+    ) {
+        Ok(id) => {
+            println!("✓ Broadcast sent (event_id: {}, channel: '{}')", id, channel);
+            id
+        }
+        Err(e) => {
+            eprintln!("✗ Broadcast failed: {}", e);
+            return;
+        }
+    };
     println!("  Message: {}", message);
     if let Some(proj) = project {
         println!("  Project: {}", proj);

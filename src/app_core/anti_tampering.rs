@@ -320,7 +320,7 @@ mod tests {
 
         let mut manager = AntiTamperingManager::new(b"secret_key");
         manager.set_alert_callback(move |alert| {
-            let mut a = alerts_clone.lock().unwrap();
+            let mut a = alerts_clone.lock().unwrap_or_else(|e| e.into_inner());
             a.push(alert);
         });
 
@@ -330,7 +330,7 @@ mod tests {
         fs::write(&file_path, b"tampered").unwrap();
         manager.verify_file(&file_path).unwrap();
 
-        let a = alerts.lock().unwrap();
+        let a = alerts.lock().unwrap_or_else(|e| e.into_inner());
         assert!(!a.is_empty());
         assert_eq!(a[0].severity, AlertSeverity::Critical);
     }

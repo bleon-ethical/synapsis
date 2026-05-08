@@ -43,7 +43,7 @@ impl SelfHealingManager {
 
     /// Register a component for health monitoring
     pub fn register_component(&self, name: &str) {
-        let mut components = self.components.write().unwrap();
+        let mut components = self.components.write().unwrap_or_else(|e| e.into_inner());
         components.insert(
             name.to_string(),
             HealthCheck {
@@ -58,7 +58,7 @@ impl SelfHealingManager {
 
     /// Report health status of a component
     pub fn report_health(&self, name: &str, healthy: bool, error: Option<String>) {
-        let mut components = self.components.write().unwrap();
+        let mut components = self.components.write().unwrap_or_else(|e| e.into_inner());
 
         if let Some(check) = components.get_mut(name) {
             check.last_check = Instant::now();
@@ -84,7 +84,7 @@ impl SelfHealingManager {
     where
         F: Fn() -> Result<(), String>,
     {
-        let mut components = self.components.write().unwrap();
+        let mut components = self.components.write().unwrap_or_else(|e| e.into_inner());
 
         if let Some(check) = components.get_mut(name) {
             if check.status == HealthStatus::Unhealthy {
@@ -167,7 +167,7 @@ mod tests {
         let manager = SelfHealingManager::new();
         manager.register_component("database");
 
-        manager.report_health("database", false, Some("Connection failed"));
+        manager.report_health("database", false, Some("Connection failed".to_string()));
 
         let status = manager.get_health_status();
         assert_eq!(status[0].status, HealthStatus::Unhealthy);
@@ -180,7 +180,7 @@ mod tests {
         manager.register_component("database");
 
         // Make it unhealthy
-        manager.report_health("database", false, Some("Connection failed"));
+        manager.report_health("database", false, Some("Connection failed".to_string()));
 
         // Attempt recovery
         let result = manager.attempt_recovery("database", || Ok(()));
@@ -195,7 +195,7 @@ mod tests {
         manager.register_component("database");
 
         // Make it unhealthy
-        manager.report_health("database", false, Some("Connection failed"));
+        manager.report_health("database", false, Some("Connection failed".to_string()));
 
         // Attempt recovery that fails
         let result = manager.attempt_recovery("database", || Err("Still failing".to_string()));
@@ -211,7 +211,7 @@ mod tests {
 
         // Report unhealthy multiple times
         for _ in 0..5 {
-            manager.report_health("database", false, Some("Error"));
+            manager.report_health("database", false, Some("Error".to_string()));
         }
 
         let status = manager.get_health_status();
@@ -226,7 +226,7 @@ mod tests {
         manager.register_component("network");
 
         // Make one unhealthy
-        manager.report_health("cache", false, Some("Cache miss"));
+        manager.report_health("cache", false, Some("Cache miss".to_string()));
 
         assert!(!manager.is_healthy());
 

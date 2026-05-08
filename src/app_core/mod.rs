@@ -5,6 +5,7 @@
 pub mod anti_tampering;
 pub mod audit_logger;
 pub mod resilience;
+pub mod resources;
 pub mod self_healing;
 pub mod updater;
 

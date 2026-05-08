@@ -142,14 +142,14 @@ fn load_cookies_from_file(tab: &Tab, session_id: &str) -> Result<()> {
 
 /// Navigate to URL with authentication, performing login if needed
 pub fn auth_navigate(
-    url: &str,
-    session_id: &str,
-    login_url: Option<&str>,
-    login_selector_user: Option<&str>,
-    login_selector_pass: Option<&str>,
-    username: Option<&str>,
-    password: Option<&str>,
-    login_button_selector: Option<&str>,
+    _url: &str,
+    _session_id: &str,
+    _login_url: Option<&str>,
+    _login_selector_user: Option<&str>,
+    _login_selector_pass: Option<&str>,
+    _username: Option<&str>,
+    _password: Option<&str>,
+    _login_button_selector: Option<&str>,
 ) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!(
@@ -271,9 +271,9 @@ pub fn auth_navigate(
 
 /// Take a screenshot within authenticated session
 pub fn auth_screenshot(
-    session_id: &str,
-    output_path: &str,
-    wait_seconds: u64,
+    _session_id: &str,
+    _output_path: &str,
+    _wait_seconds: u64,
 ) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -316,15 +316,15 @@ pub fn auth_screenshot(
 
 /// Login, navigate and extract visible text in ONE operation (for SPAs like Netacad)
 pub fn auth_login_and_extract(
-    url: &str,
-    session_id: &str,
-    login_url: Option<&str>,
-    login_selector_user: Option<&str>,
-    login_selector_pass: Option<&str>,
-    username: Option<&str>,
-    password: Option<&str>,
-    login_button_selector: Option<&str>,
-    wait_seconds: u64,
+    _url: &str,
+    _session_id: &str,
+    _login_url: Option<&str>,
+    _login_selector_user: Option<&str>,
+    _login_selector_pass: Option<&str>,
+    _username: Option<&str>,
+    _password: Option<&str>,
+    _login_button_selector: Option<&str>,
+    _wait_seconds: u64,
 ) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
@@ -512,7 +512,7 @@ pub fn auth_login_and_extract(
 }
 
 /// Extract visible text content from an authenticated session (rendered text, not HTML)
-pub fn auth_extract_text(session_id: &str, wait_seconds: u64) -> Result<serde_json::Value> {
+pub fn auth_extract_text(_session_id: &str, _wait_seconds: u64) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
 
@@ -570,7 +570,7 @@ pub fn auth_extract_text(session_id: &str, wait_seconds: u64) -> Result<serde_js
 }
 
 /// Extract content from authenticated session
-pub fn auth_extract(session_id: &str, selector: &str) -> Result<serde_json::Value> {
+pub fn auth_extract(_session_id: &str, _selector: &str) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
 
@@ -628,7 +628,7 @@ pub fn auth_extract(session_id: &str, selector: &str) -> Result<serde_json::Valu
 }
 
 /// Navigate within an authenticated session
-pub fn auth_navigate_session(session_id: &str, url: &str) -> Result<serde_json::Value> {
+pub fn auth_navigate_session(_session_id: &str, _url: &str) -> Result<serde_json::Value> {
     #[cfg(not(feature = "browser"))]
     return Err(anyhow!("Browser feature not enabled."));
 

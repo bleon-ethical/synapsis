@@ -1,6 +1,5 @@
 //! Synapsis MCP Server Implementation
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -36,59 +35,8 @@ use synapsis_core::infrastructure::agents::AgentRegistry;
 use synapsis_core::infrastructure::database::Database;
 use synapsis_core::infrastructure::plugin::PluginManager;
 use synapsis_core::infrastructure::skills::SkillRegistry;
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Event {
-    event_type: String,
-    session_id: Option<String>,
-    agent_type: Option<String>,
-    project: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
-    content: Option<String>,
-    task_id: Option<String>,
-    skill_id: Option<String>,
-    timestamp: i64,
-}
 
-impl Event {
-    fn new(event_type: &str) -> Self {
-        Self {
-            event_type: event_type.to_string(),
-            session_id: None,
-            agent_type: None,
-            project: None,
-            from: None,
-            to: None,
-            content: None,
-            task_id: None,
-            skill_id: None,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PendingMessage {
-    from: Option<String>,
-    content: String,
-    timestamp: i64,
-}
-
-impl PendingMessage {
-    fn new(from: Option<String>, content: String) -> Self {
-        Self {
-            from,
-            content,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
-        }
-    }
-}
+use crate::app_core::resources::ResourceMonitor;
 
 #[derive(Debug, Clone)]
 struct ConnectionInfo {
@@ -107,52 +55,7 @@ enum ConnectionStatus {
     Disconnected,
 }
 
-struct EventBus {
-    events: Arc<Mutex<Vec<Event>>>,
-    message_queue: Arc<Mutex<HashMap<String, Vec<PendingMessage>>>>,
-}
-
-impl EventBus {
-    fn new() -> Self {
-        Self {
-            events: Arc::new(Mutex::new(Vec::new())),
-            message_queue: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    fn publish(&self, event: Event) {
-        let mut events = self.events.lock().unwrap();
-        events.push(event.clone());
-        if events.len() > 1000 {
-            events.drain(0..500);
-        }
-
-        // Queue message for recipient if it's a direct message
-        if event.event_type == "message" {
-            if let (Some(to), Some(content)) = (&event.to, &event.content) {
-                let mut queue = self.message_queue.lock().unwrap();
-                let msg = PendingMessage::new(event.from.clone(), content.clone());
-                queue.entry(to.clone()).or_default().push(msg);
-            }
-        }
-    }
-
-    fn poll(&self, since: i64) -> Vec<Event> {
-        let events = self.events.lock().unwrap();
-        events
-            .iter()
-            .filter(|e| e.timestamp > since)
-            .cloned()
-            .collect()
-    }
-
-    fn get_pending_messages(&self, session_id: &str) -> Vec<PendingMessage> {
-        let mut queue = self.message_queue.lock().unwrap();
-        queue.remove(session_id).unwrap_or_default()
-    }
-}
-
-// Persistent EventBus using SQLite - shared across all MCP instances
+// Persistent EventBus - SQLite-backed, shared across all MCP instances
 struct PersistentEventBus {
     db: Arc<Database>,
 }
@@ -233,10 +136,10 @@ pub struct McpServer {
     antibrick: Arc<AntiBrickEngine>,
     watchdog: Arc<FilesystemWatchdog>,
     client_name: Arc<RwLock<Option<String>>>,
-    event_bus: Arc<EventBus>,
     persistent_event_bus: Arc<PersistentEventBus>,
     plugin_manager: Arc<PluginManager>,
     crypto_provider: Arc<dyn CryptoProvider>,
+    resource_monitor: Arc<ResourceMonitor>,
     connections: Arc<Mutex<HashMap<String, ConnectionInfo>>>,
     shutdown_requested: Arc<AtomicBool>,
     updater: Arc<crate::app_core::updater::AutoUpdater>,
@@ -263,10 +166,10 @@ impl McpServer {
             antibrick: Arc::new(AntiBrickEngine::new(AntiBrickConfig::default())),
             watchdog: Arc::new(FilesystemWatchdog::new(Default::default())),
             client_name: Arc::new(RwLock::new(None)),
-            event_bus: Arc::new(EventBus::new()),
             persistent_event_bus,
             plugin_manager: Arc::new(PluginManager::new(plugin_dir)),
             crypto_provider: Arc::new(PqcryptoProvider::new()),
+            resource_monitor: Arc::new(ResourceMonitor::new()),
             connections: Arc::new(Mutex::new(HashMap::new())),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             updater: Arc::new(crate::app_core::updater::AutoUpdater::new(db.clone())),
@@ -380,7 +283,7 @@ impl McpServer {
 
         // Update connection activity
         if let Some(client_name) = self.client_name.read().unwrap().as_ref() {
-            let mut connections = self.connections.lock().unwrap();
+            let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(conn) = connections.get_mut(client_name) {
                 conn.last_activity = Instant::now();
             }
@@ -396,12 +299,12 @@ impl McpServer {
                     .unwrap_or("mcp-client")
                     .to_string();
                 {
-                    let mut client_name_lock = self.client_name.write().unwrap();
+                    let mut client_name_lock = self.client_name.write().unwrap_or_else(|e| e.into_inner());
                     *client_name_lock = Some(client_name.clone());
                 }
                 // Track connection
                 let connection_id = client_name.clone();
-                let mut connections = self.connections.lock().unwrap();
+                let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
                 connections.insert(
                     connection_id,
                     ConnectionInfo {
@@ -528,7 +431,9 @@ impl McpServer {
                     { "name": "kino_train", "description": "Trigger NUM-JEPA training for Kino model", "inputSchema": { "type": "object", "properties": { "epochs": { "type": "integer" } } } },
                     { "name": "kino_stats", "description": "Get Kino system statistics", "inputSchema": { "type": "object", "properties": {} } },
                     { "name": "materia_status", "description": "Get M.A.T.E.R.I.A. engine status", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "system_resources", "description": "Get GPU/RAM/CPU system usage", "inputSchema": { "type": "object", "properties": {} } },
+                    { "name": "system_resources", "description": "Get GPU/RAM/CPU system usage (sysinfo-based)", "inputSchema": { "type": "object", "properties": {} } },
+                    { "name": "resource_snapshot", "description": "Get live resource snapshot with load level", "inputSchema": { "type": "object", "properties": {} } },
+                    { "name": "resource_limits", "description": "Get or set resource limits (max agents, throttle, etc.)", "inputSchema": { "type": "object", "properties": { "max_agents": { "type": "integer" }, "cpu_threshold_pct": { "type": "number" }, "ram_threshold_mb": { "type": "integer" }, "throttle_delay_ms": { "type": "integer" } } } },
 
                     // System: Crypto & Env
                     { "name": "pqc_encrypt", "description": "Post-Quantum encrypted data (AES-256-GCM)", "inputSchema": { "type": "object", "properties": { "plaintext": { "type": "string" } }, "required": ["plaintext"] } },
@@ -664,6 +569,8 @@ impl McpServer {
             "kino_stats" => self.action_kino_stats(args),
             "materia_status" => self.action_materia_status(args),
             "system_resources" => self.action_system_resources(args),
+            "resource_snapshot" => self.action_resource_snapshot(args),
+            "resource_limits" => self.action_resource_limits(args),
 
             // System: Crypto & Env
             "pqc_encrypt" | "crypto_pqc_encrypt" => self.action_crypto_pqc_encrypt(args),
@@ -1091,7 +998,11 @@ impl McpServer {
             .crypto_provider
             .encrypt(&key, plaintext.as_bytes(), PqcAlgorithm::Aes256Gcm)
             .map_err(|e| format!("Encryption failed: {}", e))?;
-        Ok(json!({ "ciphertext": hex::encode(ciphertext) }))
+        Ok(json!({
+            "ciphertext": hex::encode(&ciphertext),
+            "key": hex::encode(&key),
+            "algorithm": "AES-256-GCM"
+        }))
     }
 
     fn action_wasm_run(&self, _args: &Value) -> Result<Value, String> {
@@ -1668,7 +1579,7 @@ impl McpServer {
     }
 
     fn action_connection_status(&self, _args: &Value) -> Result<Value, String> {
-        let mut connections = self.connections.lock().unwrap();
+        let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
         let mut status_list = Vec::new();
         for (id, conn) in connections.iter_mut() {
             let elapsed = conn.last_activity.elapsed();
@@ -1868,112 +1779,159 @@ impl McpServer {
     fn action_system_resources(&self, args: &Value) -> Result<Value, String> {
         let _ = args;
 
-        // GPU info via nvidia-smi
-        let gpu_info = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=index,name,memory.used,memory.total,utilization.gpu,utilization.memory,temperature.gpu", "--format=csv,noheader,nounits"])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok());
-
-        // RAM info
-        let ram_info = std::process::Command::new("free")
-            .args(["-m"])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok());
-
-        // CPU info
-        let cpu_info = std::process::Command::new("nproc")
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_string());
-
-        let load_avg = std::fs::read_to_string("/proc/loadavg")
-            .ok()
-            .map(|s| s.trim().to_string());
+        use sysinfo::System;
+        let mut sys = System::new_all();
+        sys.refresh_all();
 
         let mut result = serde_json::Map::new();
 
-        if let Some(gpu) = gpu_info {
+        // CPU info via sysinfo
+        result.insert(
+            "cpu_cores".to_string(),
+            Value::Number(serde_json::Number::from(sys.cpus().len())),
+        );
+        let cpu_usage: f64 = sys.cpus().iter().map(|c| c.cpu_usage() as f64).sum::<f64>()
+            / sys.cpus().len().max(1) as f64;
+        result.insert(
+            "cpu_usage_pct".to_string(),
+            Value::Number(
+                serde_json::Number::from_f64((cpu_usage * 10.0).round() / 10.0)
+                    .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+
+        // RAM info via sysinfo
+        let total_mb = sys.total_memory() / 1024 / 1024;
+        let used_mb = sys.used_memory() / 1024 / 1024;
+        let free_mb = sys.free_memory() / 1024 / 1024;
+        result.insert("ram_total_mb".to_string(), Value::Number(serde_json::Number::from(total_mb)));
+        result.insert("ram_used_mb".to_string(), Value::Number(serde_json::Number::from(used_mb)));
+        result.insert("ram_free_mb".to_string(), Value::Number(serde_json::Number::from(free_mb)));
+        let ram_pct = if total_mb > 0 {
+            (used_mb as f64 / total_mb as f64 * 100.0) as u64
+        } else { 0 };
+        result.insert("ram_usage_pct".to_string(), Value::Number(serde_json::Number::from(ram_pct)));
+
+        // Swap
+        let swap_total = sys.total_swap() / 1024 / 1024;
+        let swap_used = sys.used_swap() / 1024 / 1024;
+        result.insert("swap_total_mb".to_string(), Value::Number(serde_json::Number::from(swap_total)));
+        result.insert("swap_used_mb".to_string(), Value::Number(serde_json::Number::from(swap_used)));
+
+        // System info
+        result.insert(
+            "system_name".to_string(),
+            Value::String(
+                System::name().unwrap_or_else(|| "unknown".to_string())
+            ),
+        );
+        result.insert(
+            "kernel_version".to_string(),
+            Value::String(
+                System::kernel_version().unwrap_or_else(|| "unknown".to_string())
+            ),
+        );
+        result.insert(
+            "hostname".to_string(),
+            Value::String(
+                System::host_name().unwrap_or_else(|| "unknown".to_string())
+            ),
+        );
+
+        // Uptime (hours)
+        let uptime_h = (System::uptime() as f64 / 3600.0 * 10.0).round() / 10.0;
+        result.insert(
+            "uptime_hours".to_string(),
+            Value::Number(
+                serde_json::Number::from_f64(uptime_h)
+                    .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+
+        // GPU info via nvidia-smi (sysinfo doesn't support GPUs)
+        if let Some(gpu) = std::process::Command::new("nvidia-smi")
+            .args(["--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu", "--format=csv,noheader,nounits"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+        {
             let mut gpus = Vec::new();
             for line in gpu.lines() {
                 let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-                if parts.len() >= 7 {
+                if parts.len() >= 6 {
                     let mut gpu_obj = serde_json::Map::new();
                     gpu_obj.insert("id".to_string(), Value::String(parts[0].to_string()));
                     gpu_obj.insert("name".to_string(), Value::String(parts[1].to_string()));
                     if let Ok(mem_used) = parts[2].parse::<f64>() {
-                        gpu_obj.insert(
-                            "memory_used_mb".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(mem_used)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
+                        gpu_obj.insert("memory_used_mb".to_string(), Value::Number(
+                            serde_json::Number::from_f64(mem_used).unwrap_or(serde_json::Number::from(0))
+                        ));
                     }
                     if let Ok(mem_total) = parts[3].parse::<f64>() {
-                        gpu_obj.insert(
-                            "memory_total_mb".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(mem_total)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
+                        gpu_obj.insert("memory_total_mb".to_string(), Value::Number(
+                            serde_json::Number::from_f64(mem_total).unwrap_or(serde_json::Number::from(0))
+                        ));
                     }
                     if let Ok(util_gpu) = parts[4].parse::<f64>() {
-                        gpu_obj.insert(
-                            "gpu_utilization_pct".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(util_gpu)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
+                        gpu_obj.insert("gpu_utilization_pct".to_string(), Value::Number(
+                            serde_json::Number::from_f64(util_gpu).unwrap_or(serde_json::Number::from(0))
+                        ));
                     }
-                    if let Ok(util_mem) = parts[5].parse::<f64>() {
-                        gpu_obj.insert(
-                            "memory_utilization_pct".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(util_mem)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
-                    }
-                    if let Ok(temp) = parts[6].parse::<f64>() {
-                        gpu_obj.insert(
-                            "temperature_c".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(temp)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
+                    if let Ok(temp) = parts[5].parse::<f64>() {
+                        gpu_obj.insert("temperature_c".to_string(), Value::Number(
+                            serde_json::Number::from_f64(temp).unwrap_or(serde_json::Number::from(0))
+                        ));
                     }
                     gpus.push(Value::Object(gpu_obj));
                 }
             }
             result.insert("gpus".to_string(), Value::Array(gpus));
-        } else {
-            result.insert(
-                "gpus".to_string(),
-                Value::String("nvidia-smi not available".to_string()),
-            );
-        }
-
-        if let Some(ram) = ram_info {
-            result.insert("ram_free_m".to_string(), Value::String(ram));
-        }
-
-        if let Some(cpus) = cpu_info {
-            result.insert(
-                "cpu_cores".to_string(),
-                Value::String(cpus.trim().to_string()),
-            );
-        }
-
-        if let Some(load) = load_avg {
-            result.insert("load_avg".to_string(), Value::String(load));
         }
 
         Ok(Value::Object(result))
+    }
+
+    fn action_resource_snapshot(&self, _args: &Value) -> Result<Value, String> {
+        let snap = self.resource_monitor.snapshot();
+        Ok(json!({
+            "cpu_cores": snap.cpu_cores,
+            "cpu_usage_pct": snap.cpu_usage_pct,
+            "ram_total_mb": snap.ram_total_mb,
+            "ram_used_mb": snap.ram_used_mb,
+            "ram_free_mb": snap.ram_free_mb,
+            "load_level": format!("{:?}", snap.load_level),
+            "throttle_delay_ms": self.resource_monitor.throttle_delay().as_millis(),
+        }))
+    }
+
+    fn action_resource_limits(&self, args: &Value) -> Result<Value, String> {
+        if let Some(max_agents) = args.get("max_agents").and_then(|v| v.as_u64()) {
+            let mut limits = self.resource_monitor.get_limits();
+            limits.max_concurrent_agents = max_agents as usize;
+            self.resource_monitor.set_limits(limits);
+        }
+        if let Some(cpu_pct) = args.get("cpu_threshold_pct").and_then(|v| v.as_f64()) {
+            let mut limits = self.resource_monitor.get_limits();
+            limits.cpu_threshold_pct = cpu_pct;
+            self.resource_monitor.set_limits(limits);
+        }
+        if let Some(ram_mb) = args.get("ram_threshold_mb").and_then(|v| v.as_u64()) {
+            let mut limits = self.resource_monitor.get_limits();
+            limits.ram_threshold_mb = ram_mb;
+            self.resource_monitor.set_limits(limits);
+        }
+        if let Some(delay_ms) = args.get("throttle_delay_ms").and_then(|v| v.as_u64()) {
+            let mut limits = self.resource_monitor.get_limits();
+            limits.throttle_delay_ms = delay_ms;
+            self.resource_monitor.set_limits(limits);
+        }
+        let limits = self.resource_monitor.get_limits();
+        Ok(json!({
+            "max_concurrent_agents": limits.max_concurrent_agents,
+            "max_tasks_per_agent": limits.max_tasks_per_agent,
+            "cpu_threshold_pct": limits.cpu_threshold_pct,
+            "ram_threshold_mb": limits.ram_threshold_mb,
+            "throttle_delay_ms": limits.throttle_delay_ms,
+        }))
     }
 }

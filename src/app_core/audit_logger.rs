@@ -247,7 +247,10 @@ mod tests {
         logger.log_rate_limit("1.2.3.4", 50).unwrap();
 
         // Verify file exists and has content
-        let log_file = temp_dir.path().join("audit_test.log");
+        let log_file = temp_dir.path().join(format!(
+            "audit_{}.log",
+            chrono::Local::now().format("%Y%m%d")
+        ));
         let content = std::fs::read_to_string(&log_file).unwrap();
         let lines: Vec<&str> = content.lines().collect();
 

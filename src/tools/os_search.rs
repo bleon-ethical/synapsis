@@ -29,18 +29,25 @@ pub fn os_search(
                 .output()?
         }
         "adb" => {
-            // Search on Android via ADB
+            // Search on Android via ADB - fixed shell injection
+            // Use individual args instead of format!() to prevent command injection
             Command::new("adb")
                 .arg("shell")
-                .arg(format!("find {} -name '{}'", path, pattern))
+                .arg("find")
+                .arg(path)
+                .arg("-name")
+                .arg(pattern)
                 .output()?
         }
         "ssh" => {
             if let Some(host) = ssh_target {
-                // Search on remote system via SSH
+                // Search on remote system via SSH - fixed shell injection
                 Command::new("ssh")
                     .arg(host)
-                    .arg(format!("find {} -name '{}'", path, pattern))
+                    .arg("find")
+                    .arg(path)
+                    .arg("-name")
+                    .arg(pattern)
                     .output()?
             } else {
                 return Ok(json!({

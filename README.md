@@ -41,6 +41,12 @@ synapsis --version # Check current version
 synapsis mcp    # JSON-RPC over stdio for IDE/CLI/TUI integration
 ```
 
+### Serve HTTP API
+
+```bash
+synapsis serve --port 7439   # REST API (default: 7439)
+```
+
 ---
 
 ## Architecture
@@ -78,13 +84,17 @@ CLI (opencode, qwen, mw-cli)  IDE (vscode, cursor, jetbrains)  TUI (mw-cli)
 - HMAC-SHA256 session integrity
 - Zero-trust architecture with continuous verification
 
-### Performance
-| Metric | Synapsis (Rust) | Traditional (Go) |
-|--------|-----------------|------------------|
-| Binary Size | <5 MB | ~15 MB |
-| Memory RSS | <20 MB | ~50 MB |
-| Search Latency | <1 ms | ~5 ms |
-| Cold Start | <20 ms | ~100 ms |
+### Performance (Verified vs Go-based Engram)
+
+| Metric | Synapsis (Rust) | Engram (Go) | Delta |
+|--------|-----------------|-------------|-------|
+| Binary Size (stripped) | **7.8 MB** | 13 MB | **-40%** |
+| Memory RSS (idle) | **~2 MB** | ~2 MB | Same |
+| Cold Start (--help) | **~5 ms** | ~5 ms | Same |
+| Runtime Deps | 10 (SSL + SQLCipher for PQC encryption) | 3 (Go static, pure libc) | More deps due to crypto |
+| MCP Tools | **60+** | ~15 | 4x more |
+| Encrypted Storage | SQLCipher + AES-256-GCM | Plain SQLite | PQC-grade |
+| Post-Quantum Crypto | Kyber-512 + Dilithium-2 | None | Unique |
 
 ---
 
@@ -173,10 +183,11 @@ CLI (opencode, qwen, mw-cli)  IDE (vscode, cursor, jetbrains)  TUI (mw-cli)
 
 | Feature | Description |
 |---------|-------------|
-| System Monitoring | Real-time CPU, memory, load tracking |
-| Adaptive Throttling | Automatic delay based on load |
-| Agent Limits | Per-agent concurrency caps |
-| Priority Scheduling | Critical tasks get resources first |
+| Live Monitoring | Real-time CPU, RAM, swap, uptime via `sysinfo` crate |
+| GPU Tracking | NVIDIA GPU stats via nvidia-smi |
+| Adaptive Throttling | Auto-delay based on load (Idle/Normal/Busy/Critical) |
+| Agent Limits | Per-agent concurrency caps + priority scheduling |
+| Resource Limits API | Query/set limits via `resource_snapshot` + `resource_limits` MCP tools |
 
 ---
 
@@ -188,7 +199,8 @@ synapsis/
 │   ├── main.rs           # Binary entry (synapsis)
 │   ├── bin/mcp.rs        # MCP server binary (synapsis-mcp)
 │   ├── lib.rs            # Library root
-│   ├── app_core/         # App-specific core logic
+│   ├── app_core/         # Security, resilience, resources, updater
+│   │   ├── resources.rs       # ResourceMonitor + adaptive throttling
 │   ├── cli/              # CLI parser
 │   ├── presentation/     # MCP, HTTP servers
 │   ├── tools/            # Tool implementations

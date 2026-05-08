@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Parse global config and command
     let mut parser = synapsis::cli::ArgParser::new(&args);
-    let (config, command) = match parser.parse_all() {
+    let (_config, command) = match parser.parse_all() {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Error: {}", e);

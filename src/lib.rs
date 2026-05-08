@@ -2,7 +2,7 @@
 //!
 //! This is the main application crate, building on top of `synapsis-core`
 //! to provide the full Synapsis experience with MCP, HTTP, CLI, and TUI interfaces.
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
+#![allow(dead_code, unused_imports)]
 #![recursion_limit = "512"]
 
 // Re-export synapsis-core as the foundation

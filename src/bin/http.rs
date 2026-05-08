@@ -33,9 +33,13 @@ async fn main() {
         );
     }
 
-    let addr: SocketAddr = format!("{}:{}", args.host, args.port)
-        .parse()
-        .expect("Invalid address");
+    let addr: SocketAddr = match format!("{}:{}", args.host, args.port).parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            eprintln!("Error: Invalid address '{}:{}' - {}", args.host, args.port, e);
+            std::process::exit(1);
+        }
+    };
 
     let routes = rest::routes();
 

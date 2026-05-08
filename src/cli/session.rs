@@ -18,7 +18,7 @@ pub fn init_cli_session(cli_type: &str) -> SessionId {
 
     // Register in global registry
     {
-        let mut registry = SESSION_REGISTRY.write().unwrap();
+        let mut registry = SESSION_REGISTRY.write().unwrap_or_else(|e| e.into_inner());
         registry.register(session.clone());
     }
 
@@ -49,7 +49,7 @@ pub fn list_active_sessions(max_age_secs: i64) -> Vec<String> {
 
 /// Cleanup stale sessions
 pub fn cleanup_stale_sessions(max_age_secs: i64) -> usize {
-    let mut registry = SESSION_REGISTRY.write().unwrap();
+    let mut registry = SESSION_REGISTRY.write().unwrap_or_else(|e| e.into_inner());
     registry.cleanup_stale(max_age_secs)
 }
 

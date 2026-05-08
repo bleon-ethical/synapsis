@@ -85,7 +85,7 @@ pub struct DefenseRule {
 
 /// Initialize default defense rules
 pub fn init_default_rules() {
-    let mut rules = DEFENSE_RULES.lock().unwrap();
+    let mut rules = DEFENSE_RULES.lock().unwrap_or_else(|e| e.into_inner());
 
     rules.extend(vec![
         // SQL Injection
@@ -780,7 +780,7 @@ fn now_ts() -> i64 {
         .as_secs() as i64
 }
 
-fn calculate_severity(attack_type: &str, context: &str) -> u8 {
+fn calculate_severity(attack_type: &str, _context: &str) -> u8 {
     match attack_type {
         "rce" => 10,
         "command_injection" => 9,

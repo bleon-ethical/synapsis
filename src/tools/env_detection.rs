@@ -161,9 +161,7 @@ fn check_path_exists(path: &str) -> bool {
 }
 
 fn get_home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/home/methodwhite"))
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn detect_cli(name: &str, binary: &str) -> Option<HashMap<String, serde_json::Value>> {
@@ -333,7 +331,7 @@ pub fn detect_mcp_compatible() -> Result<serde_json::Value> {
 
 pub fn get_auto_connect_config() -> Result<serde_json::Value> {
     let mut configs = Vec::new();
-    let home = get_home_dir();
+    let _home = get_home_dir();
 
     // Generate MCP config for each detected CLI that supports MCP
     for (name, binary, config_dir) in KNOWN_CLIS {

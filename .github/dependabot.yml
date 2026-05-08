@@ -1,48 +1,26 @@
 version: 2
 updates:
-  # Rust dependencies (Cargo)
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "09:00"
-      timezone: "UTC"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "MethodWhite"
+    assignees:
+      - "methodwhite"
     labels:
       - "dependencies"
-      - "rust"
+      - "security"
     commit-message:
-      prefix: "chore(deps)"
-    groups:
-      rust-dependencies:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-    
-    # Ignore major updates that might break things
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    
-    # Specific rules for critical dependencies
-      - dependency-name: "pqcrypto-*"
-        update-types: ["version-update:semver-minor"]
+      prefix: "deps"
+      include: "scope"
+    open-pull-requests-limit: 10
+    versioning-strategy: "auto"
 
-  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 5
     labels:
+      - "ci"
       - "dependencies"
-      - "github-actions"
-    commit-message:
-      prefix: "ci"
