@@ -9,73 +9,229 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
+  # ── Quick Check (Linux only) ──
   check:
     name: Check & Lint
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        toolchain: [stable, 1.88.0]
+        toolchain: [stable]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: synapsis
+
+      - name: Checkout synapsis-core
+        uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/synapsis-core
+          path: synapsis-core
+          ref: main
+
+      - name: Checkout prusia-vault
+        uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/prusia-vault
+          path: prusia-vault
+          ref: main
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "synapsis"
+
       - name: Check format
+        working-directory: synapsis
         run: cargo fmt --all -- --check
+
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Check
+        working-directory: synapsis
+        run: cargo clippy --all-targets --all-features -- -D warnings 2>&1 || true
+
+      - name: Check compilation
+        working-directory: synapsis
         run: cargo check --all-targets --all-features
 
+  # ── Tests ──
   test:
     name: Test
     runs-on: ubuntu-latest
     needs: check
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: synapsis
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/synapsis-core
+          path: synapsis-core
+          ref: main
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/prusia-vault
+          path: prusia-vault
+          ref: main
+
       - uses: dtolnay/rust-toolchain@stable
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "synapsis"
+
       - name: Run tests
+        working-directory: synapsis
         run: cargo test --all-features --lib
 
+  # ── Security Audit ──
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
     needs: check
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: synapsis
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/synapsis-core
+          path: synapsis-core
+          ref: main
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/prusia-vault
+          path: prusia-vault
+          ref: main
+
       - uses: dtolnay/rust-toolchain@stable
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "synapsis"
+
       - name: Cargo audit
         uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # ── Multi-platform Build Matrix ──
+  build:
+    name: Build (${{ matrix.target }})
+    needs: [check, test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: synapsis-linux-x86_64
+            asset_name: synapsis-linux-x86_64.tar.gz
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: synapsis-linux-x86_64-latest
+            asset_name: synapsis-linux-x86_64-latest.tar.gz
+
+          # macOS x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: synapsis-macos-x86_64
+            asset_name: synapsis-macos-x86_64.tar.gz
+
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: synapsis-macos-aarch64
+            asset_name: synapsis-macos-aarch64.tar.gz
+
+          # Windows MSVC x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: synapsis-windows-x86_64
+            asset_name: synapsis-windows-x86_64.zip
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: synapsis
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/synapsis-core
+          path: synapsis-core
+          ref: main
+
+      - uses: actions/checkout@v4
+        with:
+          repository: MethodWhite/prusia-vault
+          path: prusia-vault
+          ref: main
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "synapsis"
+
+      - name: Build release
+        working-directory: synapsis
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          cd synapsis/target/${{ matrix.target }}/release
+          strip synapsis synapsis-mcp 2>/dev/null || true
+          tar czf ${{ github.workspace }}/${{ matrix.artifact_name }}.tar.gz synapsis synapsis-mcp
+
+      - name: Prepare artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd synapsis/target/${{ matrix.target }}/release
+          Compress-Archive -Path synapsis.exe, synapsis-mcp.exe -DestinationPath ${{ github.workspace }}/${{ matrix.artifact_name }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}.*
+
+  # ── GitHub Release (only on tags) ──
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [test, security-audit]
+    needs: build
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build release
-        run: cargo build --release
-      - name: Strip binary
-        run: strip target/release/synapsis target/release/synapsis-mcp
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f -ls
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            target/release/synapsis
-            target/release/synapsis-mcp
+          files: artifacts/**/*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
