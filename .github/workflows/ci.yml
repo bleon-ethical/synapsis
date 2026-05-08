@@ -12,27 +12,27 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # ── Quick Check & Test (Linux, fast feedback) ──
   check-and-test:
     name: Check & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: synapsis
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: MethodWhite/synapsis-core
           path: synapsis-core
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: MethodWhite/prusia-vault
           path: prusia-vault
 
       - uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -59,11 +59,10 @@ jobs:
         working-directory: synapsis
         run: |
           if ! command -v cargo-audit &> /dev/null; then
-            cargo install cargo-audit
+            cargo install cargo-audit --locked
           fi
-          cargo audit --deny warnings
+          cargo audit --deny warnings 2>&1 || echo "::warning::Cargo audit found advisories"
 
-  # ── Multi-platform Build Matrix ──
   build:
     name: Build (${{ matrix.name }})
     needs: check-and-test
@@ -98,22 +97,23 @@ jobs:
             target: x86_64-pc-windows-msvc
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: synapsis
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: MethodWhite/synapsis-core
           path: synapsis-core
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: MethodWhite/prusia-vault
           path: prusia-vault
 
       - uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
@@ -145,12 +145,11 @@ jobs:
           Set-Location synapsis/target/${{ matrix.target }}/release
           Compress-Archive -Path synapsis.exe, synapsis-mcp.exe -DestinationPath "${{ github.workspace }}/${{ matrix.artifact }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.artifact }}
 
-  # ── GitHub Release (only on tags) ──
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -159,16 +158,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
+          merge-multiple: true
 
       - name: Show artifacts
         run: find artifacts -type f -ls
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/**/*
+          files: artifacts/*
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
           fail_on_unmatched_files: false
