@@ -5,7 +5,10 @@ use serde_json::{json, Value};
 /// Analyze a vague idea into structured feasibility assessment
 pub fn handle_feasibility_analyze(args: &Value) -> Result<Value, String> {
     let idea = args.get("idea").and_then(|v| v.as_str()).unwrap_or("");
-    let domain = args.get("domain").and_then(|v| v.as_str()).unwrap_or("general");
+    let domain = args
+        .get("domain")
+        .and_then(|v| v.as_str())
+        .unwrap_or("general");
     let budget = args.get("budget").and_then(|v| v.as_str());
     let timeline = args.get("timeline").and_then(|v| v.as_str());
 
@@ -52,7 +55,10 @@ pub fn handle_feasibility_analyze(args: &Value) -> Result<Value, String> {
 
 /// Research current market trends for a domain
 pub fn handle_market_trends(args: &Value) -> Result<Value, String> {
-    let domain = args.get("domain").and_then(|v| v.as_str()).unwrap_or("technology");
+    let domain = args
+        .get("domain")
+        .and_then(|v| v.as_str())
+        .unwrap_or("technology");
     let keywords = args.get("keywords").and_then(|v| v.as_str()).unwrap_or("");
 
     Ok(json!({
@@ -91,7 +97,10 @@ pub fn handle_market_trends(args: &Value) -> Result<Value, String> {
 
 /// Generate a phased technical execution plan
 pub fn handle_tech_plan(args: &Value) -> Result<Value, String> {
-    let idea = args.get("idea").and_then(|v| v.as_str()).unwrap_or("project");
+    let idea = args
+        .get("idea")
+        .and_then(|v| v.as_str())
+        .unwrap_or("project");
     let team_size = args.get("team_size").and_then(|v| v.as_i64()).unwrap_or(2) as usize;
 
     let phases = vec![
@@ -165,15 +174,25 @@ pub fn handle_tech_plan(args: &Value) -> Result<Value, String> {
 fn assess_complexity(idea: &str) -> (&'static str, usize) {
     let lower = idea.to_lowercase();
     let indicators = [
-        ("AI/ML", 8, "high"), ("blockchain", 8, "high"), ("real-time", 6, "medium-high"),
-        ("distributed", 7, "high"), ("mobile app", 4, "medium"), ("web app", 3, "low-medium"),
-        ("API", 2, "low"), ("CLI tool", 2, "low"), ("database", 3, "low-medium"),
-        ("encryption", 6, "medium-high"), ("PQC", 8, "high"),
+        ("AI/ML", 8, "high"),
+        ("blockchain", 8, "high"),
+        ("real-time", 6, "medium-high"),
+        ("distributed", 7, "high"),
+        ("mobile app", 4, "medium"),
+        ("web app", 3, "low-medium"),
+        ("API", 2, "low"),
+        ("CLI tool", 2, "low"),
+        ("database", 3, "low-medium"),
+        ("encryption", 6, "medium-high"),
+        ("PQC", 8, "high"),
     ];
     let mut max_weeks = 4usize;
     let mut level = "medium";
     for (keyword, weeks, lvl) in &indicators {
-        if lower.contains(keyword) { max_weeks = std::cmp::max(max_weeks, *weeks); level = lvl; }
+        if lower.contains(keyword) {
+            max_weeks = std::cmp::max(max_weeks, *weeks);
+            level = lvl;
+        }
     }
     (level, max_weeks)
 }
@@ -181,19 +200,33 @@ fn assess_complexity(idea: &str) -> (&'static str, usize) {
 fn assess_viability(idea: &str) -> (u8, String) {
     let lower = idea.to_lowercase();
     let mut score: u8 = 5;
-    if lower.contains("AI") || lower.contains("machine learning") { score += 2; }
-    if lower.contains("automation") { score += 1; }
-    if lower.contains("security") { score += 1; }
-    if lower.contains("crypto") && !lower.contains("scam") { score += 1; }
-    if lower.contains("marketplace") { score = score.saturating_sub(1); }
-    if lower.contains("social network") { score = score.saturating_sub(2); }
-    if lower.contains("hardware") { score = score.saturating_sub(1); }
+    if lower.contains("AI") || lower.contains("machine learning") {
+        score += 2;
+    }
+    if lower.contains("automation") {
+        score += 1;
+    }
+    if lower.contains("security") {
+        score += 1;
+    }
+    if lower.contains("crypto") && !lower.contains("scam") {
+        score += 1;
+    }
+    if lower.contains("marketplace") {
+        score = score.saturating_sub(1);
+    }
+    if lower.contains("social network") {
+        score = score.saturating_sub(2);
+    }
+    if lower.contains("hardware") {
+        score = score.saturating_sub(1);
+    }
     score = score.clamp(0, 10);
     let rationale = match score {
         8..=10 => "Strong market demand signals + technical feasibility. High viability.",
         5..=7 => "Moderate viability. Requires key assumption validation before scaling.",
         0..=4 => "Significant market challenges. Consider pivoting or narrower scope.",
-        _ => "Insufficient data."
+        _ => "Insufficient data.",
     };
     (score, rationale.to_string())
 }
@@ -202,25 +235,60 @@ fn identify_risks(idea: &str) -> (&'static str, Vec<String>) {
     let lower = idea.to_lowercase();
     let mut items = Vec::new();
     let mut high = 0;
-    if lower.contains("AI") || lower.contains("ML") { items.push("Model accuracy and data quality dependencies".into()); high += 1; }
-    if lower.contains("real-time") { items.push("Latency and reliability under load".into()); high += 1; }
-    if lower.contains("security") || lower.contains("auth") { items.push("Security vulnerabilities and compliance".into()); high += 1; }
-    if lower.contains("payment") || lower.contains("financial") { items.push("Regulatory compliance and financial liability".into()); high += 1; }
-    if lower.contains("marketplace") { items.push("Two-sided marketplace liquidity problem".into()); }
-    if lower.contains("scale") || lower.contains("million") { items.push("Scaling infrastructure costs vs revenue".into()); }
+    if lower.contains("AI") || lower.contains("ML") {
+        items.push("Model accuracy and data quality dependencies".into());
+        high += 1;
+    }
+    if lower.contains("real-time") {
+        items.push("Latency and reliability under load".into());
+        high += 1;
+    }
+    if lower.contains("security") || lower.contains("auth") {
+        items.push("Security vulnerabilities and compliance".into());
+        high += 1;
+    }
+    if lower.contains("payment") || lower.contains("financial") {
+        items.push("Regulatory compliance and financial liability".into());
+        high += 1;
+    }
+    if lower.contains("marketplace") {
+        items.push("Two-sided marketplace liquidity problem".into());
+    }
+    if lower.contains("scale") || lower.contains("million") {
+        items.push("Scaling infrastructure costs vs revenue".into());
+    }
     items.push("Engineering team availability and retention".into());
     items.push("Competing priorities and scope creep".into());
-    (if high >= 2 { "high" } else if high >= 1 { "medium" } else { "low" }, items)
+    (
+        if high >= 2 {
+            "high"
+        } else if high >= 1 {
+            "medium"
+        } else {
+            "low"
+        },
+        items,
+    )
 }
 
 fn extract_must_haves(idea: &str) -> Vec<String> {
     let lower = idea.to_lowercase();
     let mut items = vec!["Core functional prototype".to_string()];
-    if lower.contains("api") { items.push("REST/GraphQL API with authentication".into()); }
-    if lower.contains("database") || lower.contains("data") { items.push("Data persistence layer with backups".into()); }
-    if lower.contains("web") { items.push("Web interface (responsive)".into()); }
-    if lower.contains("mobile") { items.push("Mobile client (iOS or Android)".into()); }
-    if lower.contains("security") || lower.contains("auth") { items.push("Authentication + authorization system".into()); }
+    if lower.contains("api") {
+        items.push("REST/GraphQL API with authentication".into());
+    }
+    if lower.contains("database") || lower.contains("data") {
+        items.push("Data persistence layer with backups".into());
+    }
+    if lower.contains("web") {
+        items.push("Web interface (responsive)".into());
+    }
+    if lower.contains("mobile") {
+        items.push("Mobile client (iOS or Android)".into());
+    }
+    if lower.contains("security") || lower.contains("auth") {
+        items.push("Authentication + authorization system".into());
+    }
     items.push("Automated test suite (unit + integration)".into());
     items
 }
@@ -242,7 +310,7 @@ fn domain_maturity(domain: &str) -> &str {
         "security" | "cybersecurity" => "Evergreen, regulatory tailwinds",
         "devtools" | "developer tools" => "Growing, sticky user base",
         "healthtech" | "fintech" => "Regulated but high-value",
-        _ => "Emerging — validate with primary research"
+        _ => "Emerging — validate with primary research",
     }
 }
 
@@ -252,7 +320,7 @@ fn competition_level(domain: &str) -> &str {
         "web" | "mobile" => "High — low barrier to entry",
         "infrastructure" | "security" => "Moderate — technical moat possible",
         "devtools" => "Moderate — developer loyalty matters",
-        _ => "Unknown — assess via direct research"
+        _ => "Unknown — assess via direct research",
     }
 }
 
@@ -262,6 +330,6 @@ fn trend_direction(domain: &str) -> &str {
         "security" => "Upward — increasing threat surface",
         "web3" => "Consolidating — infrastructure over speculation",
         "devtools" => "Upward — developer experience premium",
-        _ => "Neutral — requires domain-specific analysis"
+        _ => "Neutral — requires domain-specific analysis",
     }
 }

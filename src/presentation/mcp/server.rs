@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
+use crate::plugins::feasibility_analyzer::mcp_tools as feasibility_tools;
 use crate::tools::auth_browser::mcp_tools as auth_browser_tools;
 use crate::tools::browser_navigation::mcp_tools as browser_navigation_tools;
 use crate::tools::cve_search::mcp_tools as cve_search_tools;
@@ -17,7 +18,6 @@ use crate::tools::env_detection::handle_env_detection;
 use crate::tools::os_search::mcp_tools as os_search_tools;
 use crate::tools::security_classify::mcp_tools as security_classify_tools;
 use crate::tools::web_research::mcp_tools as web_research_tools;
-use crate::plugins::feasibility_analyzer::mcp_tools as feasibility_tools;
 
 // Plugins
 use crate::plugins::remote_control::mcp_tools as remote_control_tools;
@@ -299,7 +299,8 @@ impl McpServer {
                     .unwrap_or("mcp-client")
                     .to_string();
                 {
-                    let mut client_name_lock = self.client_name.write().unwrap_or_else(|e| e.into_inner());
+                    let mut client_name_lock =
+                        self.client_name.write().unwrap_or_else(|e| e.into_inner());
                     *client_name_lock = Some(client_name.clone());
                 }
                 // Track connection
@@ -1804,38 +1805,52 @@ impl McpServer {
         let total_mb = sys.total_memory() / 1024 / 1024;
         let used_mb = sys.used_memory() / 1024 / 1024;
         let free_mb = sys.free_memory() / 1024 / 1024;
-        result.insert("ram_total_mb".to_string(), Value::Number(serde_json::Number::from(total_mb)));
-        result.insert("ram_used_mb".to_string(), Value::Number(serde_json::Number::from(used_mb)));
-        result.insert("ram_free_mb".to_string(), Value::Number(serde_json::Number::from(free_mb)));
+        result.insert(
+            "ram_total_mb".to_string(),
+            Value::Number(serde_json::Number::from(total_mb)),
+        );
+        result.insert(
+            "ram_used_mb".to_string(),
+            Value::Number(serde_json::Number::from(used_mb)),
+        );
+        result.insert(
+            "ram_free_mb".to_string(),
+            Value::Number(serde_json::Number::from(free_mb)),
+        );
         let ram_pct = if total_mb > 0 {
             (used_mb as f64 / total_mb as f64 * 100.0) as u64
-        } else { 0 };
-        result.insert("ram_usage_pct".to_string(), Value::Number(serde_json::Number::from(ram_pct)));
+        } else {
+            0
+        };
+        result.insert(
+            "ram_usage_pct".to_string(),
+            Value::Number(serde_json::Number::from(ram_pct)),
+        );
 
         // Swap
         let swap_total = sys.total_swap() / 1024 / 1024;
         let swap_used = sys.used_swap() / 1024 / 1024;
-        result.insert("swap_total_mb".to_string(), Value::Number(serde_json::Number::from(swap_total)));
-        result.insert("swap_used_mb".to_string(), Value::Number(serde_json::Number::from(swap_used)));
+        result.insert(
+            "swap_total_mb".to_string(),
+            Value::Number(serde_json::Number::from(swap_total)),
+        );
+        result.insert(
+            "swap_used_mb".to_string(),
+            Value::Number(serde_json::Number::from(swap_used)),
+        );
 
         // System info
         result.insert(
             "system_name".to_string(),
-            Value::String(
-                System::name().unwrap_or_else(|| "unknown".to_string())
-            ),
+            Value::String(System::name().unwrap_or_else(|| "unknown".to_string())),
         );
         result.insert(
             "kernel_version".to_string(),
-            Value::String(
-                System::kernel_version().unwrap_or_else(|| "unknown".to_string())
-            ),
+            Value::String(System::kernel_version().unwrap_or_else(|| "unknown".to_string())),
         );
         result.insert(
             "hostname".to_string(),
-            Value::String(
-                System::host_name().unwrap_or_else(|| "unknown".to_string())
-            ),
+            Value::String(System::host_name().unwrap_or_else(|| "unknown".to_string())),
         );
 
         // Uptime (hours)
@@ -1843,14 +1858,16 @@ impl McpServer {
         result.insert(
             "uptime_hours".to_string(),
             Value::Number(
-                serde_json::Number::from_f64(uptime_h)
-                    .unwrap_or(serde_json::Number::from(0)),
+                serde_json::Number::from_f64(uptime_h).unwrap_or(serde_json::Number::from(0)),
             ),
         );
 
         // GPU info via nvidia-smi (sysinfo doesn't support GPUs)
         if let Some(gpu) = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu", "--format=csv,noheader,nounits"])
+            .args([
+                "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ])
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -1863,24 +1880,40 @@ impl McpServer {
                     gpu_obj.insert("id".to_string(), Value::String(parts[0].to_string()));
                     gpu_obj.insert("name".to_string(), Value::String(parts[1].to_string()));
                     if let Ok(mem_used) = parts[2].parse::<f64>() {
-                        gpu_obj.insert("memory_used_mb".to_string(), Value::Number(
-                            serde_json::Number::from_f64(mem_used).unwrap_or(serde_json::Number::from(0))
-                        ));
+                        gpu_obj.insert(
+                            "memory_used_mb".to_string(),
+                            Value::Number(
+                                serde_json::Number::from_f64(mem_used)
+                                    .unwrap_or(serde_json::Number::from(0)),
+                            ),
+                        );
                     }
                     if let Ok(mem_total) = parts[3].parse::<f64>() {
-                        gpu_obj.insert("memory_total_mb".to_string(), Value::Number(
-                            serde_json::Number::from_f64(mem_total).unwrap_or(serde_json::Number::from(0))
-                        ));
+                        gpu_obj.insert(
+                            "memory_total_mb".to_string(),
+                            Value::Number(
+                                serde_json::Number::from_f64(mem_total)
+                                    .unwrap_or(serde_json::Number::from(0)),
+                            ),
+                        );
                     }
                     if let Ok(util_gpu) = parts[4].parse::<f64>() {
-                        gpu_obj.insert("gpu_utilization_pct".to_string(), Value::Number(
-                            serde_json::Number::from_f64(util_gpu).unwrap_or(serde_json::Number::from(0))
-                        ));
+                        gpu_obj.insert(
+                            "gpu_utilization_pct".to_string(),
+                            Value::Number(
+                                serde_json::Number::from_f64(util_gpu)
+                                    .unwrap_or(serde_json::Number::from(0)),
+                            ),
+                        );
                     }
                     if let Ok(temp) = parts[5].parse::<f64>() {
-                        gpu_obj.insert("temperature_c".to_string(), Value::Number(
-                            serde_json::Number::from_f64(temp).unwrap_or(serde_json::Number::from(0))
-                        ));
+                        gpu_obj.insert(
+                            "temperature_c".to_string(),
+                            Value::Number(
+                                serde_json::Number::from_f64(temp)
+                                    .unwrap_or(serde_json::Number::from(0)),
+                            ),
+                        );
                     }
                     gpus.push(Value::Object(gpu_obj));
                 }

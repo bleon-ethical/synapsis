@@ -91,8 +91,11 @@ impl ResourceMonitor {
         if self.should_refresh() {
             self.refresh();
         }
-        self.last_snapshot.lock().unwrap().clone().unwrap_or_else(|| {
-            ResourceSnapshot {
+        self.last_snapshot
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| ResourceSnapshot {
                 cpu_cores: 0,
                 cpu_usage_pct: 0.0,
                 ram_total_mb: 0,
@@ -100,8 +103,7 @@ impl ResourceMonitor {
                 ram_free_mb: 0,
                 load_level: LoadLevel::Idle,
                 timestamp: Instant::now(),
-            }
-        })
+            })
     }
 
     fn should_refresh(&self) -> bool {
@@ -113,14 +115,17 @@ impl ResourceMonitor {
         let mut sys = System::new_all();
         sys.refresh_all();
 
-        let cpu_usage: f64 = sys.cpus().iter()
-            .map(|c| c.cpu_usage() as f64)
-            .sum::<f64>() / sys.cpus().len().max(1) as f64;
+        let cpu_usage: f64 = sys.cpus().iter().map(|c| c.cpu_usage() as f64).sum::<f64>()
+            / sys.cpus().len().max(1) as f64;
 
         let ram_total = sys.total_memory() / 1024 / 1024;
         let ram_used = sys.used_memory() / 1024 / 1024;
         let ram_free = sys.free_memory() / 1024 / 1024;
-        let ram_pct = if ram_total > 0 { (ram_used as f64 / ram_total as f64) * 100.0 } else { 0.0 };
+        let ram_pct = if ram_total > 0 {
+            (ram_used as f64 / ram_total as f64) * 100.0
+        } else {
+            0.0
+        };
 
         let snapshot = ResourceSnapshot {
             cpu_cores: sys.cpus().len(),

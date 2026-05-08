@@ -128,12 +128,21 @@ fn broadcast_message(
     let db = Database::new();
 
     let _event_id = match db.broadcast_event(
-        "cli_message", session_id, project, channel,
-        &format!(r#"{{"type":"cli_message","content":"{}"}}"#, message.replace('"', "\\\"")),
+        "cli_message",
+        session_id,
+        project,
+        channel,
+        &format!(
+            r#"{{"type":"cli_message","content":"{}"}}"#,
+            message.replace('"', "\\\"")
+        ),
         priority,
     ) {
         Ok(id) => {
-            println!("✓ Broadcast sent (event_id: {}, channel: '{}')", id, channel);
+            println!(
+                "✓ Broadcast sent (event_id: {}, channel: '{}')",
+                id, channel
+            );
             id
         }
         Err(e) => {
