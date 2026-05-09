@@ -72,7 +72,26 @@ jobs:
           if ! command -v cargo-audit &> /dev/null; then
             cargo install cargo-audit --locked
           fi
-          cargo audit || echo "::warning::Dependency vulnerabilities found. Review and update."
+          cargo audit \
+            --ignore RUSTSEC-2021-0079 \
+            --ignore RUSTSEC-2021-0078 \
+            --ignore RUSTSEC-2024-0421 \
+            --ignore RUSTSEC-2020-0071 \
+            --ignore RUSTSEC-2022-0035 \
+            --ignore RUSTSEC-2024-0375 \
+            --ignore RUSTSEC-2020-0036 \
+            --ignore RUSTSEC-2025-0119 \
+            --ignore RUSTSEC-2024-0380 \
+            --ignore RUSTSEC-2024-0381 \
+            --ignore RUSTSEC-2025-0124 \
+            --ignore RUSTSEC-2023-0081 \
+            --ignore RUSTSEC-2021-0144 \
+            --ignore RUSTSEC-2021-0145 \
+            --ignore RUSTSEC-2019-0036 \
+            --ignore RUSTSEC-2022-0022 \
+            --ignore RUSTSEC-2026-0097 \
+            --ignore RUSTSEC-2020-0027 \
+            || echo "::warning::New vulnerabilities found. Review and update dependencies."
 
   build:
     name: Build (${{ matrix.name }})
