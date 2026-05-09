@@ -41,7 +41,9 @@ jobs:
         run: |
           sudo apt-get update -y -q
           sudo apt-get install -y -q libssl-dev libsqlcipher-dev pkg-config
-          echo "SQLCipher installed: $(pkg-config --libs sqlcipher 2>/dev/null || echo 'checking...')"
+          sudo ldconfig
+          echo "SQLCipher: $(pkg-config --libs sqlcipher)"
+          echo "SQLCipher path: $(find /usr/lib -name 'libsqlcipher*' 2>/dev/null | head -3)"
 
       - uses: Swatinem/rust-cache@v2
         with:
