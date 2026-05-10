@@ -82,8 +82,7 @@ argon2 = "0.5"
 mdns-sd = "0.11"
 
 # Browser automation
-headless_chrome = { version = "0.9", optional = true }
-failure = "0.1"
+headless_chrome = { version = "1.0.21", optional = true }
 
 # System monitoring
 sysinfo = "0.38"

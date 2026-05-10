@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 #[cfg(feature = "browser")]
-use headless_chrome::protocol::page::ScreenshotFormat;
+use headless_chrome::protocol::cdp::Page;
 #[cfg(feature = "browser")]
 use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
 
@@ -302,7 +302,7 @@ pub fn auth_screenshot(
         std::thread::sleep(wait);
 
         let png_data = tab
-            .capture_screenshot(ScreenshotFormat::PNG, None, true)
+            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
             .map_err(|e| anyhow!("Failed to capture screenshot: {}", e))?;
 
         fs::write(output_path, &png_data)

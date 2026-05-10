@@ -7,7 +7,7 @@ use std::fs;
 use std::time::Duration;
 
 #[cfg(feature = "browser")]
-use headless_chrome::protocol::page::ScreenshotFormat;
+use headless_chrome::protocol::cdp::Page;
 #[cfg(feature = "browser")]
 use headless_chrome::{Browser, LaunchOptionsBuilder};
 
@@ -250,7 +250,7 @@ pub fn screenshot(url: &str, output_path: &str) -> Result<()> {
         std::thread::sleep(Duration::from_secs(2));
 
         let png_data = tab
-            .capture_screenshot(ScreenshotFormat::PNG, None, true)
+            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
             .map_err(|e| anyhow!("Failed to capture screenshot: {}", e))?;
 
         // Save to file

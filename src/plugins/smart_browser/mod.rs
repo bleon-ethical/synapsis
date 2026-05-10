@@ -20,7 +20,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 #[cfg(feature = "browser")]
-use headless_chrome::protocol::page::ScreenshotFormat;
+use headless_chrome::protocol::cdp::Page;
 #[cfg(feature = "browser")]
 use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
 
@@ -544,7 +544,7 @@ pub fn smart_screenshot(session_id: &str, output_path: &str) -> Result<Value> {
         std::thread::sleep(Duration::from_secs(2));
 
         let png_data = tab
-            .capture_screenshot(ScreenshotFormat::PNG, None, true)
+            .capture_screenshot(Page::CaptureScreenshotFormatOption::Png, None, None, true)
             .map_err(|e| anyhow!("Screenshot failed: {}", e))?;
 
         std::fs::write(output_path, &png_data).map_err(|e| anyhow!("Save failed: {}", e))?;
