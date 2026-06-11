@@ -24,6 +24,10 @@ path = "src/main.rs"
 name = "synapsis-mcp"
 path = "src/bin/mcp.rs"
 
+[[bin]]
+name = "synapsis-cli"
+path = "src/bin/synapsis-cli.rs"
+
 #[[bin]]
 #name = "synapsis-ollama"
 #path = "src/bin/ollama.rs"

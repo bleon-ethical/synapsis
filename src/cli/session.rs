@@ -3,7 +3,7 @@
 //! Each CLI instance gets a unique identity.
 //! Multiple instances of the same CLI can run simultaneously.
 
-use crate::core::session_id::{SessionId, SessionRegistry};
+use synapsis_core::core::session_id::{SessionId, SessionRegistry};
 use std::sync::{Arc, RwLock};
 
 // Global session registry

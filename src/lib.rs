@@ -5,8 +5,10 @@
 #![allow(dead_code, unused_imports)]
 #![recursion_limit = "512"]
 
-// Re-export synapsis-core as the foundation
-pub use synapsis_core::*;
+// Clean Architecture modules (domain, application, infrastructure)
+pub mod domain;
+pub mod application;
+pub mod infrastructure;
 
 // App-specific core logic (updater, resilience, etc.)
 pub mod app_core;
@@ -24,9 +26,6 @@ pub mod plugins;
 
 // Session cleanup module - automatic session lifecycle management
 pub mod session_cleanup;
-
-// Re-export domain types for convenience
-pub use domain::*;
 
 // Re-export core modules explicitly to resolve path issues
 pub mod rate_limiter {

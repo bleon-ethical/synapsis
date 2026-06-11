@@ -16,8 +16,8 @@
 //! init_session_cleanup(&db);
 //! ```
 
-use crate::core::session_cleanup::{SessionCleanupConfig, SessionCleanupJob};
-use crate::infrastructure::database::Database;
+use synapsis_core::core::session_cleanup::{SessionCleanupConfig, SessionCleanupJob};
+use synapsis_core::infrastructure::database::Database;
 use std::sync::Arc;
 
 /// Default session timeout (5 minutes)
@@ -124,7 +124,7 @@ pub fn init_session_cleanup_with_config(
 pub fn manual_cleanup(
     db: &Arc<Database>,
     timeout_secs: u64,
-) -> Result<crate::core::session_cleanup::CleanupStats, String> {
+) -> Result<synapsis_core::core::session_cleanup::CleanupStats, String> {
     let config = SessionCleanupConfig {
         session_timeout_secs: timeout_secs,
         cleanup_interval_secs: 60,
