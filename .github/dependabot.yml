@@ -4,23 +4,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-    assignees:
-      - "methodwhite"
-    labels:
-      - "dependencies"
-      - "security"
-    commit-message:
-      prefix: "deps"
-      include: "scope"
     open-pull-requests-limit: 10
-    versioning-strategy: "auto"
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
     labels:
-      - "ci"
       - "dependencies"
+      - "rust"
