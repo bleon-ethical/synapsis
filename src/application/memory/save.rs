@@ -13,6 +13,6 @@ impl<'a> SaveMemory<'a> {
 
     pub fn execute(&self, session_id: SessionId, title: &str, content: &str) -> Result<String, String> {
         let obs = Observation::new(session_id, ObservationType::Manual, title.to_string(), content.to_string());
-        self.storage.save_observation(&obs).map(|id| id.0).map_err(|e| e.to_string())
+        self.storage.save_observation(&obs).map(|id| id.0.to_string()).map_err(|e| e.to_string())
     }
 }

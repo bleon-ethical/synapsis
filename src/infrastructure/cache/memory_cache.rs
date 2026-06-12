@@ -10,6 +10,7 @@ struct CacheEntry<T> {
 pub struct MemoryCache<T> {
     inner: RwLock<HashMap<String, CacheEntry<T>>>,
     default_ttl: Option<Duration>,
+    max_entries: usize,
 }
 
 impl<T: Clone> MemoryCache<T> {
@@ -17,7 +18,13 @@ impl<T: Clone> MemoryCache<T> {
         Self {
             inner: RwLock::new(HashMap::new()),
             default_ttl,
+            max_entries: 1024,
         }
+    }
+
+    pub fn with_max_entries(mut self, max: usize) -> Self {
+        self.max_entries = max;
+        self
     }
 
     pub fn get(&self, key: &str) -> Option<T> {
@@ -34,12 +41,24 @@ impl<T: Clone> MemoryCache<T> {
 
     pub fn set(&self, key: &str, value: T) {
         let expires_at = self.default_ttl.map(|ttl| Instant::now() + ttl);
-        let mut inner = self.inner.write().ok()?;
+        let mut inner = match self.inner.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        if inner.len() >= self.max_entries && !inner.contains_key(key) {
+            inner.clear();
+        }
         inner.insert(key.to_string(), CacheEntry { value, expires_at });
     }
 
     pub fn set_with_ttl(&self, key: &str, value: T, ttl: Duration) {
-        let mut inner = self.inner.write().ok()?;
+        let mut inner = match self.inner.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        if inner.len() >= self.max_entries && !inner.contains_key(key) {
+            inner.clear();
+        }
         inner.insert(
             key.to_string(),
             CacheEntry {
@@ -63,5 +82,19 @@ impl<T: Clone> MemoryCache<T> {
 
     pub fn contains(&self, key: &str) -> bool {
         self.get(key).is_some()
+    }
+
+    pub fn evict_expired(&self) -> usize {
+        let mut inner = match self.inner.write() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        let now = Instant::now();
+        let before = inner.len();
+        inner.retain(|_, entry| match entry.expires_at {
+            Some(exp) => exp > now,
+            None => true,
+        });
+        before - inner.len()
     }
 }

@@ -2,7 +2,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,26 +9,13 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
-use crate::plugins::feasibility_analyzer::mcp_tools as feasibility_tools;
-use crate::tools::auth_browser::mcp_tools as auth_browser_tools;
-use crate::tools::browser_navigation::mcp_tools as browser_navigation_tools;
-use crate::tools::cve_search::mcp_tools as cve_search_tools;
-use crate::tools::env_detection::handle_env_detection;
-use crate::tools::os_search::mcp_tools as os_search_tools;
-use crate::tools::security_classify::mcp_tools as security_classify_tools;
-use crate::tools::web_research::mcp_tools as web_research_tools;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-// Plugins
-use crate::plugins::remote_control::mcp_tools as remote_control_tools;
-use crate::plugins::security_shield;
-use crate::plugins::security_shield::mcp_tools as security_shield_tools;
-use crate::plugins::smart_browser::mcp_tools as smart_browser_tools;
 use synapsis_core::core::antibrick::{AntiBrickConfig, AntiBrickEngine};
-use synapsis_core::core::orchestrator::{AgentStatus, Orchestrator};
+use synapsis_core::core::orchestrator::Orchestrator;
 use synapsis_core::core::watchdog::FilesystemWatchdog;
 use synapsis_core::core::PqcryptoProvider;
 use synapsis_core::domain::crypto::{CryptoProvider, PqcAlgorithm};
-use synapsis_core::domain::entities::SearchParams;
 use synapsis_core::domain::*;
 use synapsis_core::infrastructure::agents::AgentRegistry;
 use synapsis_core::infrastructure::database::Database;
@@ -37,45 +23,48 @@ use synapsis_core::infrastructure::plugin::PluginManager;
 use synapsis_core::infrastructure::skills::SkillRegistry;
 
 use crate::app_core::resources::ResourceMonitor;
+use crate::infrastructure::cache::memory_cache::MemoryCache;
+use crate::plugins::security_shield;
+
+use super::resources;
 
 #[derive(Debug, Clone)]
-struct ConnectionInfo {
-    client_name: String,
-    client_type: String, // "cursor", "vscode", "cli", "tui", "unknown"
-    connected_at: Instant,
-    last_activity: Instant,
-    protocol: String, // "mcp-stdin", "mcp-tcp", "secure-tcp"
-    status: ConnectionStatus,
+pub(crate) struct ConnectionInfo {
+    pub(crate) client_name: String,
+    pub(crate) client_type: String,
+    pub(crate) connected_at: Instant,
+    pub(crate) last_activity: Instant,
+    pub(crate) protocol: String,
+    pub(crate) status: ConnectionStatus,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum ConnectionStatus {
+pub(crate) enum ConnectionStatus {
     Connected,
     Idle,
     Disconnected,
 }
 
-// Persistent EventBus - SQLite-backed, shared across all MCP instances
-struct PersistentEventBus {
+pub(crate) struct PersistentEventBus {
     db: Arc<Database>,
 }
 
-struct PublishParams<'a> {
-    event_type: &'a str,
-    from: &'a str,
-    to: Option<&'a str>,
-    project: Option<&'a str>,
-    channel: &'a str,
-    content: &'a str,
-    priority: i32,
+pub(crate) struct PublishParams<'a> {
+    pub(crate) event_type: &'a str,
+    pub(crate) from: &'a str,
+    pub(crate) to: Option<&'a str>,
+    pub(crate) project: Option<&'a str>,
+    pub(crate) channel: &'a str,
+    pub(crate) content: &'a str,
+    pub(crate) priority: i32,
 }
 
 impl PersistentEventBus {
-    fn new(db: Arc<Database>) -> Self {
+    pub(crate) fn new(db: Arc<Database>) -> Self {
         Self { db }
     }
 
-    fn publish(&self, params: PublishParams) -> Result<i64, String> {
+    pub(crate) fn publish(&self, params: PublishParams) -> Result<i64, String> {
         self.db
             .publish_event(
                 params.event_type,
@@ -89,7 +78,7 @@ impl PersistentEventBus {
             .map_err(|e| e.to_string())
     }
 
-    fn broadcast(
+    pub(crate) fn broadcast(
         &self,
         event_type: &str,
         from: &str,
@@ -103,7 +92,7 @@ impl PersistentEventBus {
             .map_err(|e| e.to_string())
     }
 
-    fn poll(
+    pub(crate) fn poll(
         &self,
         since: i64,
         channel: Option<&str>,
@@ -115,39 +104,71 @@ impl PersistentEventBus {
             .map_err(|e| e.to_string())
     }
 
-    fn get_pending_messages(&self, session_id: &str) -> Result<Vec<serde_json::Value>, String> {
+    pub(crate) fn get_pending_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<serde_json::Value>, String> {
         self.db
             .get_pending_messages(session_id)
             .map_err(|e| e.to_string())
     }
 
-    fn mark_read(&self, event_id: i64) -> Result<(), String> {
+    pub(crate) fn mark_read(&self, event_id: i64) -> Result<(), String> {
         self.db
             .acknowledge_event(event_id)
             .map_err(|e| e.to_string())
     }
 }
 
+pub(crate) struct QueryCache {
+    pub(crate) search: MemoryCache<Vec<synapsis_core::domain::entities::SearchResult>>,
+    pub(crate) chunks: MemoryCache<Vec<serde_json::Value>>,
+    pub(crate) context: MemoryCache<serde_json::Value>,
+    pub(crate) stats: MemoryCache<serde_json::Value>,
+}
+
+impl QueryCache {
+    pub(crate) fn with_ttl(ttl: Duration) -> Self {
+        Self {
+            search: MemoryCache::new(Some(ttl)).with_max_entries(256),
+            chunks: MemoryCache::new(Some(ttl)).with_max_entries(128),
+            context: MemoryCache::new(Some(ttl)).with_max_entries(128),
+            stats: MemoryCache::new(Some(Duration::from_secs(5))).with_max_entries(32),
+        }
+    }
+
+    pub(crate) fn invalidate_all(&self) {
+        self.search.clear();
+        self.chunks.clear();
+        self.context.clear();
+        self.stats.clear();
+    }
+
+    pub(crate) fn invalidate_search(&self) {
+        self.search.clear();
+    }
+}
+
 pub struct McpServer {
-    db: Arc<Database>,
-    skills: Arc<SkillRegistry>,
-    agents: Arc<AgentRegistry>,
-    orchestrator: Arc<Orchestrator>,
-    antibrick: Arc<AntiBrickEngine>,
-    watchdog: Arc<FilesystemWatchdog>,
-    client_name: Arc<RwLock<Option<String>>>,
-    persistent_event_bus: Arc<PersistentEventBus>,
-    plugin_manager: Arc<PluginManager>,
-    crypto_provider: Arc<dyn CryptoProvider>,
-    resource_monitor: Arc<ResourceMonitor>,
-    connections: Arc<Mutex<HashMap<String, ConnectionInfo>>>,
-    shutdown_requested: Arc<AtomicBool>,
-    updater: Arc<crate::app_core::updater::AutoUpdater>,
+    pub(crate) db: Arc<Database>,
+    pub(crate) skills: Arc<SkillRegistry>,
+    pub(crate) agents: Arc<AgentRegistry>,
+    pub(crate) orchestrator: Arc<Orchestrator>,
+    pub(crate) antibrick: Arc<AntiBrickEngine>,
+    pub(crate) watchdog: Arc<FilesystemWatchdog>,
+    pub(crate) client_name: Arc<RwLock<Option<String>>>,
+    pub(crate) persistent_event_bus: Arc<PersistentEventBus>,
+    pub(crate) plugin_manager: Arc<PluginManager>,
+    pub(crate) crypto_provider: Arc<dyn CryptoProvider>,
+    pub(crate) resource_monitor: Arc<ResourceMonitor>,
+    pub(crate) cache: QueryCache,
+    pub(crate) connections: Arc<Mutex<HashMap<String, ConnectionInfo>>>,
+    pub(crate) shutdown_requested: Arc<AtomicBool>,
+    pub(crate) updater: Arc<crate::app_core::updater::AutoUpdater>,
 }
 
 impl McpServer {
     pub fn new(db: Arc<Database>, orchestrator: Arc<Orchestrator>) -> Self {
-        // Determine plugin directory
         let plugin_dir = dirs::data_local_dir()
             .map(|mut d| {
                 d.push("synapsis");
@@ -167,9 +188,10 @@ impl McpServer {
             watchdog: Arc::new(FilesystemWatchdog::new(Default::default())),
             client_name: Arc::new(RwLock::new(None)),
             persistent_event_bus,
-            plugin_manager: Arc::new(PluginManager::new(plugin_dir)),
+            plugin_manager: Arc::new(PluginManager::with_path(plugin_dir)),
             crypto_provider: Arc::new(PqcryptoProvider::new()),
             resource_monitor: Arc::new(ResourceMonitor::new()),
+            cache: QueryCache::with_ttl(Duration::from_secs(30)),
             connections: Arc::new(Mutex::new(HashMap::new())),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             updater: Arc::new(crate::app_core::updater::AutoUpdater::new(db.clone())),
@@ -177,7 +199,6 @@ impl McpServer {
     }
 
     pub fn init(&self) {
-        // Initialize database tables first
         if let Err(e) = self.db.init() {
             eprintln!("[MCP] Warning: Database init failed: {}", e);
         }
@@ -186,13 +207,12 @@ impl McpServer {
         self.agents.init().ok();
         self.watchdog.start_monitoring();
 
-        // Initialize security shield default rules
         security_shield::init_default_rules();
 
         eprintln!("[MCP] Rust Server Initialized (watchdog + security shield started)");
     }
 
-    fn get_agent_id(&self) -> String {
+    pub(crate) fn get_agent_id(&self) -> String {
         let client_name_lock = self.client_name.read().unwrap();
         client_name_lock
             .as_deref()
@@ -200,27 +220,29 @@ impl McpServer {
             .to_string()
     }
 
-    fn get_session_id(&self) -> types::SessionId {
+    pub(crate) fn get_session_id(&self) -> types::SessionId {
         let client_name_lock = self.client_name.read().unwrap();
         let cli_type = client_name_lock.as_deref().unwrap_or("mcp-session");
         types::SessionId::new(cli_type)
     }
 
-    pub fn run(&self) -> Result<()> {
-        let stdin = io::stdin();
-        let mut stdout = io::stdout();
-        let mut reader = io::BufReader::new(stdin.lock());
+    pub async fn run(&self) -> Result<()> {
+        let stdin = tokio::io::stdin();
+        let mut stdout = tokio::io::stdout();
+        let mut reader = tokio::io::BufReader::new(stdin);
 
         loop {
             let mut line = String::new();
-            if reader.read_line(&mut line)? == 0 {
+            if reader.read_line(&mut line).await? == 0 {
                 break;
             }
 
             if let Some(resp_str) = self.handle_message(&line) {
-                writeln!(stdout, "{}", resp_str)?;
-                stdout.flush()?;
+                stdout.write_all(resp_str.as_bytes()).await?;
+                stdout.write_all(b"\n").await?;
+                stdout.flush().await?;
             }
+
             if self.shutdown_requested.load(Ordering::SeqCst) {
                 break;
             }
@@ -247,7 +269,6 @@ impl McpServer {
         match self.handle_request(request) {
             Ok(response) => {
                 if is_notification {
-                    // Notifications should not receive a response
                     None
                 } else {
                     serde_json::to_string(&response).ok()
@@ -255,7 +276,6 @@ impl McpServer {
             }
             Err(e) => {
                 if is_notification {
-                    // Errors in notifications are not sent back
                     None
                 } else {
                     let err_resp = json!({
@@ -281,7 +301,6 @@ impl McpServer {
         let method = request["method"].as_str().unwrap_or("");
         let id = &request["id"];
 
-        // Update connection activity
         if let Some(client_name) = self.client_name.read().unwrap().as_ref() {
             let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(conn) = connections.get_mut(client_name) {
@@ -303,7 +322,6 @@ impl McpServer {
                         self.client_name.write().unwrap_or_else(|e| e.into_inner());
                     *client_name_lock = Some(client_name.clone());
                 }
-                // Track connection
                 let connection_id = client_name.clone();
                 let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
                 connections.insert(
@@ -334,7 +352,7 @@ impl McpServer {
                     }
                 }))
             }
-            "initialized" => Ok(json!(null)), // notification, no response needed
+            "initialized" => Ok(json!(null)),
             "shutdown" => {
                 self.shutdown_requested.store(true, Ordering::SeqCst);
                 Ok(json!({
@@ -343,17 +361,13 @@ impl McpServer {
                     "result": null
                 }))
             }
-            "$/cancelRequest" => Ok(json!(null)), // ignore
+            "$/cancelRequest" => Ok(json!(null)),
             "tools/list" => self.list_tools(id),
             "tools/call" => self.call_tool(id, &request["params"]),
             "resources/list" => Ok(json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "result": { "resources": [
-                    { "uri": "synapsis://memory", "name": "Memory" },
-                    { "uri": "synapsis://skills", "name": "Skills" },
-                    { "uri": "synapsis://agents", "name": "Agents" }
-                ] }
+                "result": { "resources": super::resources::list_resources() }
             })),
             "prompts/list" => Ok(json!({
                 "jsonrpc": "2.0",
@@ -381,1590 +395,10 @@ impl McpServer {
                 }
             }
             _ => {
-                // Bridge for mw-cli direct method calls
                 let args = self.extract_args(&request["params"]);
                 let tool_params = json!({ "name": method, "arguments": args });
                 self.call_tool(id, &tool_params)
             }
         }
-    }
-
-    fn list_tools(&self, id: &Value) -> Result<Value> {
-        Ok(json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "tools": [
-                    // Memory Tools
-                    { "name": "mem_save", "description": "Save an observation to Synapsis persistent memory", "inputSchema": { "type": "object", "properties": { "title": { "type": "string" }, "content": { "type": "string" }, "project": { "type": "string" } }, "required": ["title", "content"] } },
-                    { "name": "mem_search", "description": "Search observations using FTS5 vector-lite engine", "inputSchema": { "type": "object", "properties": { "query": { "type": "string" }, "project": { "type": "string" }, "limit": { "type": "integer" } }, "required": ["query"] } },
-                    { "name": "mem_update", "description": "Update existing observation (creates audit entry)", "inputSchema": { "type": "object", "properties": { "observation_id": { "type": "integer" }, "new_content": { "type": "string" }, "reason": { "type": "string" } }, "required": ["observation_id", "new_content"] } },
-                    { "name": "mem_delete", "description": "Soft-delete an observation", "inputSchema": { "type": "object", "properties": { "observation_id": { "type": "integer" }, "reason": { "type": "string" } }, "required": ["observation_id"] } },
-                    { "name": "mem_timeline", "description": "Get memory timeline for a project", "inputSchema": { "type": "object", "properties": { "project": { "type": "string" }, "limit": { "type": "integer" } } } },
-                    { "name": "mem_context", "description": "Get relevant context for current session", "inputSchema": { "type": "object", "properties": { "project": { "type": "string" }, "limit": { "type": "integer" } } } },
-                    { "name": "mem_session_start", "description": "Initialize a new agent session", "inputSchema": { "type": "object", "properties": { "agent_type": { "type": "string" }, "project": { "type": "string" } }, "required": ["agent_type"] } },
-                    { "name": "mem_session_end", "description": "Finalize an agent session", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" } }, "required": ["session_id"] } },
-                    { "name": "mem_stats", "description": "Get memory and agent status overview", "inputSchema": { "type": "object", "properties": { "project": { "type": "string" } } } },
-                    { "name": "mem_lock_acquire", "description": "Acquire a distributed lock on a resource", "inputSchema": { "type": "object", "properties": { "resource": { "type": "string" }, "session_id": { "type": "string" }, "ttl_seconds": { "type": "integer" } }, "required": ["resource", "session_id"] } },
-                    { "name": "mem_lock_release", "description": "Release a distributed lock", "inputSchema": { "type": "object", "properties": { "resource": { "type": "string" }, "session_id": { "type": "string" } }, "required": ["resource", "session_id"] } },
-
-                    // Coordination & Task Tools
-                    { "name": "agent_heartbeat", "description": "Send heartbeat and update current task/status", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "status": { "type": "string", "enum": ["idle", "busy"] }, "task": { "type": "string" } }, "required": ["session_id", "status"] } },
-                    { "name": "agent_details", "description": "Get agent details and status", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" } }, "required": ["session_id"] } },
-                    { "name": "task_create", "description": "Create a new coordinated task", "inputSchema": { "type": "object", "properties": { "task_type": { "type": "string" }, "payload": { "type": "string" }, "priority": { "type": "integer" }, "project": { "type": "string" } }, "required": ["task_type", "payload"] } },
-                    { "name": "task_claim", "description": "Claim a pending task for an agent", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "task_type": { "type": "string" } }, "required": ["session_id"] } },
-                    { "name": "task_list", "description": "List all tasks with filtering", "inputSchema": { "type": "object", "properties": { "project": { "type": "string" }, "status": { "type": "string" }, "task_type": { "type": "string" }, "limit": { "type": "integer" } } } },
-                    { "name": "task_cancel", "description": "Cancel a pending or active task", "inputSchema": { "type": "object", "properties": { "task_id": { "type": "string" } }, "required": ["task_id"] } },
-                    { "name": "task_complete", "description": "Mark a task as completed", "inputSchema": { "type": "object", "properties": { "task_id": { "type": "string" }, "success": { "type": "boolean" }, "result": { "type": "string" }, "error": { "type": "string" } }, "required": ["task_id"] } },
-                    { "name": "task_delegate", "description": "Delegate task to another agent", "inputSchema": { "type": "object", "properties": { "task_id": { "type": "string" }, "from_agent": { "type": "string" } }, "required": ["task_id", "from_agent"] } },
-                    { "name": "task_request", "description": "Request best agent for skills", "inputSchema": { "type": "object", "properties": { "skills": { "type": "array", "items": { "type": "string" } } }, "required": ["skills"] } },
-                    { "name": "task_audit", "description": "Audit a completed task", "inputSchema": { "type": "object", "properties": { "task_id": { "type": "string" }, "auditor_session_id": { "type": "string" }, "audit_status": { "type": "string" }, "audit_notes": { "type": "string" } }, "required": ["task_id", "auditor_session_id"] } },
-                    { "name": "ghost_audit", "description": "Request external audit of a path", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } },
-
-                    // Intelligence Tools
-                    { "name": "web_research", "description": "Consult specialized web intelligence", "inputSchema": { "type": "object", "properties": { "query": { "type": "string" }, "limit": { "type": "integer" } }, "required": ["query"] } },
-                    { "name": "cve_search", "description": "Search NVD database for vulnerabilities", "inputSchema": { "type": "object", "properties": { "cve_id": { "type": "string" }, "keyword": { "type": "string" }, "limit": { "type": "integer" } } } },
-                    { "name": "security_classify", "description": "Analyze risk level of specialized content", "inputSchema": { "type": "object", "properties": { "text": { "type": "string" }, "context": { "type": "string" } }, "required": ["text"] } },
-                    { "name": "os_search", "description": "Search file systems across Local, Android (ADB), or Remote (SSH)", "inputSchema": { "type": "object", "properties": { "target": { "type": "string", "enum": ["local", "adb", "ssh"] }, "path": { "type": "string" }, "pattern": { "type": "string" }, "ssh_target": { "type": "string" } }, "required": ["target", "path", "pattern"] } },
-
-                    // M.A.T.E.R.I.A. Tools (NUM-JEPA)
-                    { "name": "kino_predict", "description": "Get Kino lottery prediction using NUM-JEPA", "inputSchema": { "type": "object", "properties": { "top": { "type": "integer" }, "arch": { "type": "boolean" } } } },
-                    { "name": "kino_train", "description": "Trigger NUM-JEPA training for Kino model", "inputSchema": { "type": "object", "properties": { "epochs": { "type": "integer" } } } },
-                    { "name": "kino_stats", "description": "Get Kino system statistics", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "materia_status", "description": "Get M.A.T.E.R.I.A. engine status", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "system_resources", "description": "Get GPU/RAM/CPU system usage (sysinfo-based)", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "resource_snapshot", "description": "Get live resource snapshot with load level", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "resource_limits", "description": "Get or set resource limits (max agents, throttle, etc.)", "inputSchema": { "type": "object", "properties": { "max_agents": { "type": "integer" }, "cpu_threshold_pct": { "type": "number" }, "ram_threshold_mb": { "type": "integer" }, "throttle_delay_ms": { "type": "integer" } } } },
-
-                    // System: Crypto & Env
-                    { "name": "pqc_encrypt", "description": "Post-Quantum encrypted data (AES-256-GCM)", "inputSchema": { "type": "object", "properties": { "plaintext": { "type": "string" } }, "required": ["plaintext"] } },
-                    { "name": "wasm_run", "description": "Run WASM module securely", "inputSchema": { "type": "object", "properties": { "module_path": { "type": "string" } }, "required": ["module_path"] } },
-                    { "name": "env_detection", "description": "Detect execution environment", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string" } } } },
-                    { "name": "connection_status", "description": "Get all active client connections", "inputSchema": { "type": "object", "properties": {} } },
-
-                    // Browser Navigation Tools
-                    { "name": "browser_navigate", "description": "Navigate to a URL", "inputSchema": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } },
-                    { "name": "browser_extract_text", "description": "Extract all text from current page", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "browser_click", "description": "Click element by selector", "inputSchema": { "type": "object", "properties": { "selector": { "type": "string" } }, "required": ["selector"] } },
-                    { "name": "browser_fill_form", "description": "Fill form field", "inputSchema": { "type": "object", "properties": { "selector": { "type": "string" }, "value": { "type": "string" } }, "required": ["selector", "value"] } },
-                    { "name": "browser_screenshot", "description": "Take screenshot", "inputSchema": { "type": "object", "properties": { "output_path": { "type": "string" } }, "required": ["output_path"] } },
-
-                    // Authenticated Browser Tools
-                    { "name": "auth_screenshot", "description": "Screenshot in auth session", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "output_path": { "type": "string" } }, "required": ["session_id", "output_path"] } },
-                    { "name": "auth_login_and_extract", "description": "Login and extract content", "inputSchema": { "type": "object", "properties": { "url": { "type": "string" }, "session_id": { "type": "string" }, "username": { "type": "string" }, "password": { "type": "string" } }, "required": ["url", "session_id"] } },
-                    { "name": "auth_navigate", "description": "Navigate with auth support", "inputSchema": { "type": "object", "properties": { "url": { "type": "string" }, "session_id": { "type": "string" } }, "required": ["url", "session_id"] } },
-                    { "name": "auth_extract", "description": "Extract with CSS selectors", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "selector": { "type": "string" } }, "required": ["session_id", "selector"] } },
-                    { "name": "auth_clear_session", "description": "Clear auth session", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" } }, "required": ["session_id"] } },
-                    { "name": "auth_list_sessions", "description": "List all auth sessions", "inputSchema": { "type": "object", "properties": {} } },
-
-                    // Smart Browser Tools
-                    { "name": "smart_navigate", "description": "Intelligent URL navigation", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "url": { "type": "string" }, "wait_seconds": { "type": "integer" } }, "required": ["session_id", "url"] } },
-                    { "name": "smart_find_element", "description": "Find element by context", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "search_query": { "type": "string" }, "element_type": { "type": "string" } }, "required": ["session_id", "search_query"] } },
-                    { "name": "smart_click", "description": "Human-like click", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "selector": { "type": "string" } }, "required": ["session_id", "selector"] } },
-                    { "name": "smart_fill", "description": "Fill field by description", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "field_description": { "type": "string" }, "value": { "type": "string" } }, "required": ["session_id", "field_description", "value"] } },
-                    { "name": "smart_submit", "description": "Smart form submission", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" } }, "required": ["session_id"] } },
-                    { "name": "smart_screenshot", "description": "Screenshot for analysis", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" }, "output_path": { "type": "string" } }, "required": ["session_id", "output_path"] } },
-                    { "name": "smart_session_info", "description": "Get smart session info", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" } }, "required": ["session_id"] } },
-
-                    // Remote Control & Agent Management
-                    { "name": "agent_register", "description": "Register a new agent", "inputSchema": { "type": "object", "properties": { "agent_id": { "type": "string" }, "name": { "type": "string" }, "capabilities": { "type": "array" } }, "required": ["agent_id", "name"] } },
-                    { "name": "agent_send_message", "description": "Send message to agent", "inputSchema": { "type": "object", "properties": { "from": { "type": "string" }, "to": { "type": "string" }, "content": { "type": "string" }, "message_type": { "type": "string" } }, "required": ["from", "to", "content"] } },
-                    { "name": "agent_receive_messages", "description": "Receive agent messages", "inputSchema": { "type": "object", "properties": { "agent_id": { "type": "string" }, "limit": { "type": "integer" } }, "required": ["agent_id"] } },
-                    { "name": "agent_self_configure", "description": "Auto-configure agent", "inputSchema": { "type": "object", "properties": { "agent_id": { "type": "string" }, "config_updates": { "type": "object" } }, "required": ["agent_id"] } },
-                    { "name": "agent_self_heal", "description": "Detect and fix issues", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "agent_add_heal_rule", "description": "Add self-healing rule", "inputSchema": { "type": "object", "properties": { "trigger_pattern": { "type": "string" }, "condition": { "type": "string" }, "action": { "type": "string" } }, "required": ["trigger_pattern", "condition", "action"] } },
-                    { "name": "agent_learn", "description": "Learn from feedback", "inputSchema": { "type": "object", "properties": { "agent_id": { "type": "string" }, "action": { "type": "string" }, "result": { "type": "string" }, "success": { "type": "boolean" } }, "required": ["agent_id", "action", "result", "success"] } },
-                    { "name": "agent_execute_command", "description": "Execute command securely", "inputSchema": { "type": "object", "properties": { "command": { "type": "string" }, "args": { "type": "array" } }, "required": ["command"] } },
-                    { "name": "agent_secure_read", "description": "Read file securely", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } },
-                    { "name": "agent_update_security_policy", "description": "Update security policy", "inputSchema": { "type": "object", "properties": { "updates": { "type": "object" } }, "required": ["updates"] } },
-                    { "name": "agent_security_status", "description": "Get security status", "inputSchema": { "type": "object", "properties": {} } },
-
-                    // Security Shield Tools
-                    { "name": "security_sanitize_input", "description": "Sanitize against injections", "inputSchema": { "type": "object", "properties": { "input": { "type": "string" }, "context": { "type": "string" } }, "required": ["input"] } },
-                    { "name": "security_is_safe", "description": "Quick safety check", "inputSchema": { "type": "object", "properties": { "input": { "type": "string" } }, "required": ["input"] } },
-                    { "name": "security_monitor_network", "description": "Monitor network activity", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "security_detect_lateral_movement", "description": "Scan for lateral movement", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "security_detect_gap_attacks", "description": "Scan for gap attacks", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "security_audit", "description": "Full security audit", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "security_threat_log", "description": "Get recent threats", "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer" } } } },
-                    { "name": "security_events", "description": "Get security events", "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer" } } } },
-
-                    // Antibrick & Watchdog
-                    { "name": "antibrick_scan", "description": "Scan command for bricks", "inputSchema": { "type": "object", "properties": { "command": { "type": "string" }, "args": { "type": "array" } }, "required": ["command"] } },
-                    { "name": "antibrick_stats", "description": "Antibrick statistics", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "antibrick_enable", "description": "Enable/disable antibrick", "inputSchema": { "type": "object", "properties": { "enable": { "type": "boolean" } }, "required": ["enable"] } },
-                    { "name": "watchdog_stats", "description": "Watchdog statistics", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "watchdog_verify", "description": "Verify file integrity", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "watchdog_snapshot", "description": "Take filesystem snapshot", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } },
-                    { "name": "watchdog_events", "description": "Get watchdog events", "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer" } } } },
-                    { "name": "watchdog_check_path", "description": "Check path protection", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } },
-
-                    // Messaging & Events
-                    { "name": "send_message", "description": "Send persistent message", "inputSchema": { "type": "object", "properties": { "to": { "type": "string" }, "content": { "type": "string" }, "session_id": { "type": "string" }, "project": { "type": "string" } }, "required": ["to", "content"] } },
-                    { "name": "event_poll", "description": "Poll persistent events", "inputSchema": { "type": "object", "properties": { "since": { "type": "integer" }, "channel": { "type": "string" }, "project": { "type": "string" }, "limit": { "type": "integer" } } } },
-                    { "name": "event_ack", "description": "Acknowledge event", "inputSchema": { "type": "object", "properties": { "event_id": { "type": "integer" } }, "required": ["event_id"] } },
-                    { "name": "get_pending_messages", "description": "Get pending messages", "inputSchema": { "type": "object", "properties": { "session_id": { "type": "string" } }, "required": ["session_id"] } },
-                    { "name": "broadcast", "description": "Broadcast to channel", "inputSchema": { "type": "object", "properties": { "content": { "type": "string" }, "session_id": { "type": "string" }, "channel": { "type": "string" } }, "required": ["content"] } },
-
-                    // Plugin Management
-                    { "name": "plugin_load", "description": "Load dynamic plugin", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } },
-                    { "name": "plugin_unload", "description": "Unload dynamic plugin", "inputSchema": { "type": "object", "properties": { "plugin_id": { "type": "string" } }, "required": ["plugin_id"] } },
-                    { "name": "plugin_list", "description": "List loaded plugins", "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "plugin_info", "description": "Get plugin metadata", "inputSchema": { "type": "object", "properties": { "plugin_id": { "type": "string" } }, "required": ["plugin_id"] } },
-                    { "name": "plugin_enable", "description": "Enable/disable plugin", "inputSchema": { "type": "object", "properties": { "plugin_id": { "type": "string" }, "enabled": { "type": "boolean" } }, "required": ["plugin_id"] } },
-                    { "name": "plugin_health", "description": "Plugin health check", "inputSchema": { "type": "object", "properties": { "plugin_id": { "type": "string" } } } },
-                    { "name": "plugin_update_check", "description": "Check for updates", "inputSchema": { "type": "object", "properties": {} } },
-                     { "name": "plugin_cleanup", "description": "Cleanup unused plugins", "inputSchema": { "type": "object", "properties": { "max_age_seconds": { "type": "integer" } } } },
-
-                     // System Health
-                     { "name": "db_health", "description": "Database health metrics and saturation status", "inputSchema": { "type": "object", "properties": {} } },
-
-                     // Feasibility Analyzer
-                     { "name": "feasibility_analyze", "description": "Transform a vague idea into structured feasibility assessment with complexity, viability, risks, requirements, and next steps", "inputSchema": { "type": "object", "properties": { "idea": { "type": "string", "description": "The idea or concept to analyze" }, "domain": { "type": "string", "description": "Domain/industry (e.g. AI, security, devtools)" }, "budget": { "type": "string" }, "timeline": { "type": "string" } }, "required": ["idea"] } },
-                     { "name": "market_trends", "description": "Research current market trends and competitive landscape for a domain", "inputSchema": { "type": "object", "properties": { "domain": { "type": "string" }, "keywords": { "type": "string" } }, "required": ["domain"] } },
-                     { "name": "tech_plan", "description": "Generate a phased technical execution plan with milestones, team config, and go/no-go criteria", "inputSchema": { "type": "object", "properties": { "idea": { "type": "string" }, "team_size": { "type": "integer" } } } }
-                ]
-            }
-        }))
-    }
-
-    fn call_tool(&self, id: &Value, params: &Value) -> Result<Value> {
-        let name = params["name"].as_str().unwrap_or("");
-        let args = &params["arguments"];
-
-        let action_result = match name {
-            // Memory & Session
-            "mem_save" => self.action_mem_save(args),
-            "mem_search" => self.action_mem_search(args),
-            "mem_update" => self.action_mem_update(args),
-            "mem_delete" => self.action_mem_delete(args),
-            "mem_timeline" => self.action_mem_timeline(args),
-            "mem_context" => self.action_mem_context(args),
-            "mem_session_start" => self.action_mem_session_start(args),
-            "mem_session_end" => self.action_mem_session_end(args),
-            "mem_stats" => self.action_mem_stats(args),
-            "mem_lock_acquire" => self.action_mem_lock_acquire(args),
-            "mem_lock_release" => self.action_mem_lock_release(args),
-
-            // Coordination & Tasks
-            "agent_heartbeat" => self.action_agent_heartbeat(args),
-            "agent_details" => self.action_agent_details(args),
-            "task_create" => self.action_task_create(args),
-            "task_claim" => self.action_task_claim(args),
-            "task_list" => self.action_task_list(args),
-            "task_cancel" => self.action_task_cancel(args),
-            "task_complete" => self.action_task_complete(args),
-            "task_delegate" => self.action_task_delegate(args),
-            "task_request" => self.action_task_request(args),
-            "task_audit" => self.action_task_audit(args),
-            "ghost_audit" => self.action_ghost_audit(args),
-
-            // Intelligence
-            "web_research" => self.action_web_research(args),
-            "cve_search" => self.action_cve_search(args),
-            "security_classify" => self.action_security_classify(args),
-            "os_search" => self.action_os_search(args),
-            // M.A.T.E.R.I.A.
-            "kino_predict" => self.action_kino_predict(args),
-            "kino_train" => self.action_kino_train(args),
-            "kino_stats" => self.action_kino_stats(args),
-            "materia_status" => self.action_materia_status(args),
-            "system_resources" => self.action_system_resources(args),
-            "resource_snapshot" => self.action_resource_snapshot(args),
-            "resource_limits" => self.action_resource_limits(args),
-
-            // System: Crypto & Env
-            "pqc_encrypt" | "crypto_pqc_encrypt" => self.action_crypto_pqc_encrypt(args),
-            "wasm_run" => self.action_wasm_run(args),
-            "env_detection" => self.action_env_detection(args),
-            "connection_status" => self.action_connection_status(args),
-
-            // System: Browser
-            "browser_navigate" => self.action_browser_navigate(args),
-            "browser_extract_text" => self.action_browser_extract_text(args),
-            "browser_click" => self.action_browser_click(args),
-            "browser_fill_form" => self.action_browser_fill_form(args),
-            "browser_screenshot" => self.action_browser_screenshot(args),
-
-            // System: Authenticated Browser
-            "auth_screenshot" => self.action_auth_screenshot(args),
-            "auth_login_and_extract" => self.action_auth_login_and_extract(args),
-            "auth_navigate" => self.action_auth_navigate(args),
-            "auth_extract" => self.action_auth_extract(args),
-            "auth_clear_session" => self.action_auth_clear_session(args),
-            "auth_list_sessions" => self.action_auth_list_sessions(args),
-
-            // Plugins: Smart Browser
-            "smart_navigate" => self.action_smart_navigate(args),
-            "smart_find_element" => self.action_smart_find_element(args),
-            "smart_click" => self.action_smart_click(args),
-            "smart_fill" => self.action_smart_fill(args),
-            "smart_submit" => self.action_smart_submit(args),
-            "smart_screenshot" => self.action_smart_screenshot(args),
-            "smart_session_info" => self.action_smart_session_info(args),
-
-            // Plugins: Remote Control
-            "agent_register" => self.action_agent_register(args),
-            "agent_send_message" => self.action_agent_send_message(args),
-            "agent_receive_messages" => self.action_agent_receive_messages(args),
-            "agent_self_configure" => self.action_agent_self_configure(args),
-            "agent_self_heal" => self.action_agent_self_heal(args),
-            "agent_add_heal_rule" => self.action_agent_add_heal_rule(args),
-            "agent_learn" => self.action_agent_learn(args),
-            "agent_execute_command" => self.action_agent_execute_command(args),
-            "agent_secure_read" => self.action_agent_secure_read(args),
-            "agent_update_security_policy" => self.action_agent_update_security_policy(args),
-            "agent_security_status" => self.action_agent_security_status(args),
-
-            // Plugins: Security Shield
-            "security_sanitize_input" => self.action_security_sanitize_input(args),
-            "security_is_safe" => self.action_security_is_safe(args),
-            "security_monitor_network" => self.action_security_monitor_network(args),
-            "security_detect_lateral_movement" => {
-                self.action_security_detect_lateral_movement(args)
-            }
-            "security_detect_gap_attacks" => self.action_security_detect_gap_attacks(args),
-            "security_audit" => self.action_security_audit(args),
-            "security_threat_log" => self.action_security_threat_log(args),
-            "security_events" => self.action_security_events(args),
-
-            // System: Antibrick & Watchdog
-            "antibrick_scan" => self.action_antibrick_scan(args),
-            "antibrick_stats" => self.action_antibrick_stats(args),
-            "antibrick_enable" => self.action_antibrick_enable(args),
-            "watchdog_stats" => self.action_watchdog_stats(args),
-            "watchdog_verify" => self.action_watchdog_verify(args),
-            "watchdog_snapshot" => self.action_watchdog_snapshot(args),
-            "watchdog_events" => self.action_watchdog_events(args),
-            "watchdog_check_path" => self.action_watchdog_check_path(args),
-
-            // Messaging & Events
-            "send_message" | "msg_send" => self.action_send_message(args),
-            "event_poll" | "msg_poll" => self.action_event_poll(args),
-            "event_ack" => self.action_event_ack(args),
-            "get_pending_messages" => self.action_get_pending_messages(args),
-            "broadcast" => self.action_broadcast(args),
-
-            // System: Plugin Management
-            "plugin_load" => self.action_plugin_load(args),
-            "plugin_unload" => self.action_plugin_unload(args),
-            "plugin_list" => self.action_plugin_list(args),
-            "plugin_info" => self.action_plugin_info(args),
-            "plugin_enable" => self.action_plugin_enable(args),
-            "plugin_disable" => self.action_plugin_disable(args),
-            "plugin_health" => self.action_plugin_health(args),
-            "plugin_update_check" => self.action_plugin_update_check(args),
-            "plugin_cleanup" => self.action_plugin_cleanup(args),
-            "db_health" => self.action_db_health(args),
-            "feasibility_analyze" => self.action_feasibility_analyze(args),
-            "market_trends" => self.action_market_trends(args),
-            "tech_plan" => self.action_tech_plan(args),
-
-            _ => Err(format!("Unknown tool: {}", name)),
-        };
-
-        match action_result {
-            Ok(result) => Ok(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
-                    "content": [{ "type": "text", "text": serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()) }]
-                }
-            })),
-            Err(e) => Ok(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": -32603, "message": e }
-            })),
-        }
-    }
-
-    // --- Private Action Methods (Unified Logic) ---
-
-    fn action_mem_session_start(&self, args: &Value) -> Result<Value, String> {
-        let agent_type = args
-            .get("agent_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let project = args
-            .get("project")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default");
-
-        let mut session_id = None;
-        let mut reconnected = false;
-
-        if let Ok(agents) = self.db.get_active_agents(Some(project)) {
-            if let Some(existing) = agents
-                .iter()
-                .find(|a| a.get("agent_type").and_then(|v| v.as_str()) == Some(agent_type))
-            {
-                session_id = existing
-                    .get("session_id")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                reconnected = true;
-            }
-        }
-
-        if session_id.is_none() {
-            let agent_instance = "unknown";
-            match self
-                .db
-                .register_agent_session(agent_type, agent_instance, project, None)
-            {
-                Ok(id) => session_id = Some(id),
-                Err(e) => return Err(e.to_string()),
-            }
-        }
-
-        Ok(json!({
-            "session_id": session_id.unwrap_or_default(),
-            "reconnected": reconnected
-        }))
-    }
-
-    fn action_mem_session_end(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        // In a real scenario, we would mark the session as inactive in DB
-        // For now, we return success
-        Ok(json!({ "success": true, "session_id": session_id }))
-    }
-
-    fn action_task_create(&self, args: &Value) -> Result<Value, String> {
-        let project = args
-            .get("project")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default");
-        let task_type = args.get("task_type").and_then(|v| v.as_str()).unwrap_or("");
-        let payload = args.get("payload").and_then(|v| v.as_str()).unwrap_or("");
-        let priority = args.get("priority").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-
-        match self.db.create_task(project, task_type, payload, priority) {
-            Ok(task_id) => Ok(json!({ "task_id": task_id })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_task_list(&self, args: &Value) -> Result<Value, String> {
-        let project = args.get("project").and_then(|v| v.as_str());
-        let task_type = args.get("task_type").and_then(|v| v.as_str());
-        let status = args.get("status").and_then(|v| v.as_str());
-        let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l as i32);
-
-        match self.db.list_tasks(project, task_type, status, limit) {
-            Ok(tasks) => Ok(json!(tasks)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_task_claim(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let task_type = args.get("task_type").and_then(|v| v.as_str());
-
-        match self.db.claim_task(session_id, task_type) {
-            Ok(Some(task)) => Ok(task),
-            Ok(None) => Ok(json!(null)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_task_cancel(&self, args: &Value) -> Result<Value, String> {
-        let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-        match self.db.cancel_task(task_id) {
-            Ok(_) => Ok(json!(true)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_task_complete_db(&self, args: &Value) -> Result<Value, String> {
-        let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-        let result = args.get("result").and_then(|v| v.as_str());
-        let error = args.get("error").and_then(|v| v.as_str());
-
-        match self.db.complete_task(task_id, result, error) {
-            Ok(_) => Ok(json!(true)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_agent_details(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        match self.db.get_agent_details(session_id) {
-            Ok(Some(details)) => Ok(details),
-            Ok(None) => Ok(json!(null)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_mem_stats(&self, args: &Value) -> Result<Value, String> {
-        let project = args.get("project").and_then(|v| v.as_str());
-        let stats = self.db.get_stats().map_err(|e| e.to_string())?;
-        let active_agents = self
-            .db
-            .get_active_agents(project)
-            .map_err(|e| e.to_string())?;
-
-        Ok(json!({
-            "observations": stats.get("observations").unwrap_or(&json!(0)),
-            "sessions": stats.get("agent_sessions").unwrap_or(&json!(0)),
-            "pending_tasks": stats.get("pending_tasks").unwrap_or(&json!(0)),
-            "active_agents": active_agents
-        }))
-    }
-
-    fn action_agent_heartbeat(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let task = args.get("task").and_then(|v| v.as_str());
-        let status_str = args
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("idle");
-
-        let status = match status_str.to_lowercase().as_str() {
-            "active" | "busy" => AgentStatus::Busy,
-            _ => AgentStatus::Idle,
-        };
-
-        self.orchestrator.heartbeat(session_id, Some(status), task);
-        match self.db.agent_heartbeat(session_id, task) {
-            Ok(_) => Ok(json!(true)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-    fn action_mem_save(&self, args: &Value) -> Result<Value, String> {
-        let title = args
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Untitled");
-        let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-        let project = args
-            .get("project")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let mut obs = entities::Observation::new(
-            self.get_session_id(),
-            types::ObservationType::Manual,
-            title.to_string(),
-            content.to_string(),
-        );
-        obs.project = project;
-
-        match self.db.save_observation(&obs) {
-            Ok(id) => Ok(json!({ "observation_id": id })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_mem_search(&self, args: &Value) -> Result<Value, String> {
-        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-        let project = args.get("project").and_then(|v| v.as_str());
-        let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(20) as i32;
-
-        let mut params = SearchParams::new(query).with_limit(limit);
-        if let Some(p) = project {
-            params.project = Some(p.to_string());
-        }
-
-        match self.db.search_observations(&params) {
-            Ok(results) => Ok(json!(results)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_mem_update(&self, args: &Value) -> Result<Value, String> {
-        let observation_id = args
-            .get("observation_id")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let new_content = args
-            .get("new_content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let reason = args.get("reason").and_then(|v| v.as_str());
-
-        match self.db.update_observation(
-            types::ObservationId(observation_id),
-            new_content,
-            &self.get_agent_id(),
-            reason,
-        ) {
-            Ok(_) => Ok(json!({ "success": true })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_mem_delete(&self, args: &Value) -> Result<Value, String> {
-        let observation_id = args
-            .get("observation_id")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let reason = args.get("reason").and_then(|v| v.as_str());
-
-        match self.db.delete_observation(
-            types::ObservationId(observation_id),
-            &self.get_agent_id(),
-            reason,
-        ) {
-            Ok(_) => Ok(json!({ "success": true })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_mem_timeline(&self, args: &Value) -> Result<Value, String> {
-        let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(20) as i32;
-        let project = args.get("project").and_then(|v| v.as_str());
-
-        let mut params = SearchParams::new("").with_limit(limit);
-        if let Some(p) = project {
-            params.project = Some(p.to_string());
-        }
-
-        match self.db.search_observations(&params) {
-            Ok(results) => Ok(json!(results)),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_web_research(&self, args: &Value) -> Result<Value, String> {
-        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
-        Ok(web_research_tools::handle_web_research(query, limit))
-    }
-
-    fn action_cve_search(&self, args: &Value) -> Result<Value, String> {
-        let cve_id = args.get("cve_id").and_then(|v| v.as_str());
-        let keyword = args.get("keyword").and_then(|v| v.as_str());
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-        Ok(cve_search_tools::handle_cve_search(cve_id, keyword, limit))
-    }
-
-    fn action_security_classify(&self, args: &Value) -> Result<Value, String> {
-        let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        let context = args
-            .get("context")
-            .and_then(|v| v.as_str())
-            .unwrap_or("general");
-        Ok(security_classify_tools::handle_security_classify(
-            text, context,
-        ))
-    }
-
-    fn action_os_search(&self, args: &Value) -> Result<Value, String> {
-        let target = args
-            .get("target")
-            .and_then(|v| v.as_str())
-            .unwrap_or("local");
-        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let pattern = args.get("pattern").and_then(|v| v.as_str()).unwrap_or("*");
-        let ssh_target = args.get("ssh_target").and_then(|v| v.as_str());
-        Ok(os_search_tools::handle_os_search(
-            target, path, pattern, ssh_target,
-        ))
-    }
-
-    fn action_ghost_audit(&self, args: &Value) -> Result<Value, String> {
-        let path = args["path"].as_str().unwrap_or(".");
-        let task_id = self.orchestrator.create_task(
-            &format!("External audit request for {}", path),
-            vec!["code_analysis".into()],
-            5,
-            None,
-        );
-        Ok(json!({ "task_id": task_id, "status": "created" }))
-    }
-
-    fn action_crypto_pqc_encrypt(&self, args: &Value) -> Result<Value, String> {
-        let plaintext = args["plaintext"].as_str().unwrap_or("");
-        let key_bytes = self
-            .crypto_provider
-            .random_bytes(32)
-            .map_err(|e| format!("Failed to generate key: {}", e))?;
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&key_bytes);
-        let ciphertext = self
-            .crypto_provider
-            .encrypt(&key, plaintext.as_bytes(), PqcAlgorithm::Aes256Gcm)
-            .map_err(|e| format!("Encryption failed: {}", e))?;
-        Ok(json!({
-            "ciphertext": hex::encode(&ciphertext),
-            "key": hex::encode(key),
-            "algorithm": "AES-256-GCM"
-        }))
-    }
-
-    fn action_wasm_run(&self, _args: &Value) -> Result<Value, String> {
-        Ok(json!({ "status": "scheduled", "message": "WASM execution scheduled via orchestrator" }))
-    }
-
-    fn action_env_detection(&self, args: &Value) -> Result<Value, String> {
-        let mode = args["mode"].as_str();
-        handle_env_detection(mode).map_err(|e| e.to_string())
-    }
-
-    fn action_antibrick_scan(&self, args: &Value) -> Result<Value, String> {
-        let command = args["command"].as_str().unwrap_or("");
-        let args_vec: Vec<String> = args["args"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(
-            synapsis_core::core::antibrick::mcp_tools::handle_antibrick_scan(
-                &self.antibrick,
-                command,
-                args_vec,
-            ),
-        )
-    }
-
-    fn action_antibrick_stats(&self, _args: &Value) -> Result<Value, String> {
-        Ok(synapsis_core::core::antibrick::mcp_tools::handle_antibrick_stats(&self.antibrick))
-    }
-
-    fn action_antibrick_enable(&self, args: &Value) -> Result<Value, String> {
-        let enable = args["enable"].as_bool().unwrap_or(true);
-        Ok(
-            synapsis_core::core::antibrick::mcp_tools::handle_antibrick_enable(
-                &self.antibrick,
-                enable,
-            ),
-        )
-    }
-
-    fn action_watchdog_stats(&self, _args: &Value) -> Result<Value, String> {
-        Ok(synapsis_core::core::watchdog::mcp_tools::handle_watchdog_stats(&self.watchdog))
-    }
-
-    fn action_watchdog_verify(&self, _args: &Value) -> Result<Value, String> {
-        Ok(synapsis_core::core::watchdog::mcp_tools::handle_watchdog_verify(&self.watchdog))
-    }
-
-    fn action_watchdog_snapshot(&self, args: &Value) -> Result<Value, String> {
-        let path = args["path"].as_str().unwrap_or("/").to_string();
-        Ok(
-            synapsis_core::core::watchdog::mcp_tools::handle_watchdog_snapshot(
-                &self.watchdog,
-                path,
-            ),
-        )
-    }
-
-    fn action_watchdog_events(&self, args: &Value) -> Result<Value, String> {
-        let limit = args["limit"].as_u64().unwrap_or(20) as usize;
-        Ok(synapsis_core::core::watchdog::mcp_tools::handle_watchdog_events(&self.watchdog, limit))
-    }
-
-    fn action_watchdog_check_path(&self, args: &Value) -> Result<Value, String> {
-        let path = args["path"].as_str().unwrap_or("/").to_string();
-        Ok(
-            synapsis_core::core::watchdog::mcp_tools::handle_watchdog_check_path(
-                &self.watchdog,
-                path,
-            ),
-        )
-    }
-
-    fn action_browser_navigate(&self, args: &Value) -> Result<Value, String> {
-        let url = args["url"].as_str().unwrap_or("");
-        Ok(browser_navigation_tools::handle_navigate_to_url(url))
-    }
-
-    fn action_browser_extract_text(&self, args: &Value) -> Result<Value, String> {
-        let url = args["url"].as_str().unwrap_or("");
-        let selector = args["selector"].as_str().unwrap_or("");
-        Ok(browser_navigation_tools::handle_extract_text(url, selector))
-    }
-
-    fn action_browser_click(&self, args: &Value) -> Result<Value, String> {
-        let url = args["url"].as_str().unwrap_or("");
-        let selector = args["selector"].as_str().unwrap_or("");
-        Ok(browser_navigation_tools::handle_click_element(
-            url, selector,
-        ))
-    }
-
-    fn action_browser_fill_form(&self, args: &Value) -> Result<Value, String> {
-        let url = args["url"].as_str().unwrap_or("");
-        let selector = args["selector"].as_str().unwrap_or("");
-        let value = args["value"].as_str().unwrap_or("");
-        Ok(browser_navigation_tools::handle_fill_form(
-            url, selector, value,
-        ))
-    }
-
-    fn action_browser_screenshot(&self, args: &Value) -> Result<Value, String> {
-        let url = args["url"].as_str().unwrap_or("");
-        let output_path = args["output_path"].as_str().unwrap_or("");
-        Ok(browser_navigation_tools::handle_screenshot(
-            url,
-            output_path,
-        ))
-    }
-
-    // Authenticated Browser Actions
-
-    fn action_auth_screenshot(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let output_path = args["output_path"]
-            .as_str()
-            .unwrap_or("/tmp/auth-screenshot.png");
-        let wait_seconds = args.get("wait_seconds").and_then(|v| v.as_u64());
-        Ok(auth_browser_tools::handle_auth_screenshot(
-            session_id,
-            output_path,
-            wait_seconds,
-        ))
-    }
-
-    fn action_auth_login_and_extract(&self, args: &Value) -> Result<Value, String> {
-        let url = args["url"].as_str().unwrap_or("");
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let login_url = args.get("login_url").and_then(|v| v.as_str());
-        let login_selector_user = args.get("login_selector_user").and_then(|v| v.as_str());
-        let login_selector_pass = args.get("login_selector_pass").and_then(|v| v.as_str());
-        let username = args.get("username").and_then(|v| v.as_str());
-        let password = args.get("password").and_then(|v| v.as_str());
-        let login_button_selector = args.get("login_button_selector").and_then(|v| v.as_str());
-        let wait_seconds = args
-            .get("wait_seconds")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(10);
-        Ok(auth_browser_tools::handle_auth_login_and_extract(
-            url,
-            session_id,
-            login_url,
-            login_selector_user,
-            login_selector_pass,
-            username,
-            password,
-            login_button_selector,
-            wait_seconds,
-        ))
-    }
-
-    fn action_auth_navigate(&self, args: &Value) -> Result<Value, String> {
-        let url = args["url"].as_str().unwrap_or("");
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let login_url = args.get("login_url").and_then(|v| v.as_str());
-        let login_selector_user = args.get("login_selector_user").and_then(|v| v.as_str());
-        let login_selector_pass = args.get("login_selector_pass").and_then(|v| v.as_str());
-        let username = args.get("username").and_then(|v| v.as_str());
-        let password = args.get("password").and_then(|v| v.as_str());
-        let login_button_selector = args.get("login_button_selector").and_then(|v| v.as_str());
-        Ok(auth_browser_tools::handle_auth_navigate(
-            url,
-            session_id,
-            login_url,
-            login_selector_user,
-            login_selector_pass,
-            username,
-            password,
-            login_button_selector,
-        ))
-    }
-
-    fn action_auth_extract(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let selector = args["selector"].as_str().unwrap_or("");
-        Ok(auth_browser_tools::handle_auth_extract(
-            session_id, selector,
-        ))
-    }
-
-    fn action_auth_extract_text(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let wait_seconds = args.get("wait_seconds").and_then(|v| v.as_u64());
-        Ok(auth_browser_tools::handle_auth_extract_text(
-            session_id,
-            wait_seconds,
-        ))
-    }
-
-    fn action_auth_navigate_session(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let url = args["url"].as_str().unwrap_or("");
-        Ok(auth_browser_tools::handle_auth_navigate_session(
-            session_id, url,
-        ))
-    }
-
-    fn action_auth_clear_session(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        Ok(auth_browser_tools::handle_auth_clear_session(session_id))
-    }
-
-    fn action_auth_list_sessions(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-        Ok(auth_browser_tools::handle_auth_list_sessions())
-    }
-
-    // === Plugin Action Methods ===
-
-    // Smart Browser Actions
-    fn action_smart_navigate(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let url = args["url"].as_str().unwrap_or("");
-        let wait = args.get("wait_seconds").and_then(|v| v.as_u64());
-        Ok(smart_browser_tools::handle_smart_navigate(
-            session_id, url, wait,
-        ))
-    }
-
-    fn action_smart_find_element(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let search = args["search_query"].as_str().unwrap_or("");
-        let etype = args.get("element_type").and_then(|v| v.as_str());
-        Ok(smart_browser_tools::handle_smart_find(
-            session_id, search, etype,
-        ))
-    }
-
-    fn action_smart_click(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let selector = args["selector"].as_str().unwrap_or("");
-        Ok(smart_browser_tools::handle_smart_click(
-            session_id, selector,
-        ))
-    }
-
-    fn action_smart_fill(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let field = args["field_description"].as_str().unwrap_or("");
-        let value = args["value"].as_str().unwrap_or("");
-        Ok(smart_browser_tools::handle_smart_fill(
-            session_id, field, value,
-        ))
-    }
-
-    fn action_smart_submit(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        Ok(smart_browser_tools::handle_smart_submit(session_id))
-    }
-
-    fn action_smart_screenshot(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let output_path = args["output_path"]
-            .as_str()
-            .unwrap_or("/tmp/smart-screenshot.png");
-        Ok(smart_browser_tools::handle_smart_screenshot(
-            session_id,
-            output_path,
-        ))
-    }
-
-    fn action_smart_session_info(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        Ok(smart_browser_tools::handle_smart_session_info(session_id))
-    }
-
-    // Remote Control Actions
-    fn action_agent_register(&self, args: &Value) -> Result<Value, String> {
-        let agent_id = args["agent_id"].as_str().unwrap_or("");
-        let name = args["name"].as_str().unwrap_or("");
-        let caps = args
-            .get("capabilities")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            });
-        Ok(remote_control_tools::handle_agent_register(
-            agent_id,
-            name,
-            caps.as_deref(),
-        ))
-    }
-
-    fn action_agent_send_message(&self, args: &Value) -> Result<Value, String> {
-        let from = args["from"].as_str().unwrap_or("");
-        let to = args["to"].as_str().unwrap_or("");
-        let content = args["content"].as_str().unwrap_or("");
-        let msg_type = args
-            .get("message_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("command");
-        let priority = args.get("priority").and_then(|v| v.as_u64()).unwrap_or(5) as u8;
-        Ok(remote_control_tools::handle_send_message(
-            from, to, content, msg_type, priority,
-        ))
-    }
-
-    fn action_agent_receive_messages(&self, args: &Value) -> Result<Value, String> {
-        let agent_id = args["agent_id"].as_str().unwrap_or("");
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
-        Ok(remote_control_tools::handle_receive_messages(
-            agent_id, limit,
-        ))
-    }
-
-    fn action_agent_self_configure(&self, args: &Value) -> Result<Value, String> {
-        let agent_id = args["agent_id"].as_str().unwrap_or("");
-        let default_config = json!({});
-        let config = args.get("config_updates").unwrap_or(&default_config);
-        Ok(remote_control_tools::handle_self_configure(
-            agent_id, config,
-        ))
-    }
-
-    fn action_agent_self_heal(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-        Ok(remote_control_tools::handle_self_heal())
-    }
-
-    fn action_agent_add_heal_rule(&self, args: &Value) -> Result<Value, String> {
-        let trigger = args
-            .get("trigger_pattern")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let condition = args.get("condition").and_then(|v| v.as_str()).unwrap_or("");
-        let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("");
-        Ok(remote_control_tools::handle_add_heal_rule(
-            trigger, condition, action,
-        ))
-    }
-
-    fn action_agent_learn(&self, args: &Value) -> Result<Value, String> {
-        let agent_id = args["agent_id"].as_str().unwrap_or("");
-        let action = args["action"].as_str().unwrap_or("");
-        let result = args["result"].as_str().unwrap_or("");
-        let success = args["success"].as_bool().unwrap_or(false);
-        Ok(remote_control_tools::handle_learn(
-            agent_id, action, result, success,
-        ))
-    }
-
-    fn action_agent_execute_command(&self, args: &Value) -> Result<Value, String> {
-        let command = args["command"].as_str().unwrap_or("");
-        let arg_arr = args
-            .get("args")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        Ok(remote_control_tools::handle_execute_command(
-            command, &arg_arr,
-        ))
-    }
-
-    fn action_agent_secure_read(&self, args: &Value) -> Result<Value, String> {
-        let path = args["path"].as_str().unwrap_or("");
-        Ok(remote_control_tools::handle_secure_read(path))
-    }
-
-    fn action_agent_update_security_policy(&self, args: &Value) -> Result<Value, String> {
-        let default_updates = json!({});
-        let updates = args.get("updates").unwrap_or(&default_updates);
-        Ok(remote_control_tools::handle_update_security_policy(updates))
-    }
-
-    fn action_agent_security_status(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-        Ok(remote_control_tools::handle_security_status())
-    }
-
-    // Security Shield Actions
-    fn action_security_sanitize_input(&self, args: &Value) -> Result<Value, String> {
-        let input = args["input"].as_str().unwrap_or("");
-        let context = args
-            .get("context")
-            .and_then(|v| v.as_str())
-            .unwrap_or("general");
-        Ok(security_shield_tools::handle_sanitize_input(input, context))
-    }
-
-    fn action_security_is_safe(&self, args: &Value) -> Result<Value, String> {
-        let input = args["input"].as_str().unwrap_or("");
-        Ok(security_shield_tools::handle_is_safe(input))
-    }
-
-    fn action_security_monitor_network(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-        Ok(security_shield_tools::handle_monitor_network())
-    }
-
-    fn action_security_detect_lateral_movement(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-        Ok(security_shield_tools::handle_detect_lateral_movement())
-    }
-
-    fn action_security_detect_gap_attacks(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-        Ok(security_shield_tools::handle_detect_gap_attacks())
-    }
-
-    fn action_security_audit(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-        Ok(security_shield_tools::handle_security_audit())
-    }
-
-    fn action_security_threat_log(&self, args: &Value) -> Result<Value, String> {
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
-        Ok(security_shield_tools::handle_threat_log(limit))
-    }
-
-    fn action_security_events(&self, args: &Value) -> Result<Value, String> {
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
-        Ok(security_shield_tools::handle_security_events(limit))
-    }
-
-    fn action_send_message(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let to = args["to"].as_str().unwrap_or("");
-        let content = args["content"].as_str().unwrap_or("");
-        let project = args.get("project").and_then(|v| v.as_str());
-        let params = PublishParams {
-            event_type: "message",
-            from: session_id,
-            to: Some(to),
-            project,
-            channel: "global",
-            content,
-            priority: 0,
-        };
-        self.persistent_event_bus
-            .publish(params)
-            .map(|_| json!({ "status": "sent" }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_event_poll(&self, args: &Value) -> Result<Value, String> {
-        let since = args["since"].as_i64().unwrap_or(0);
-        let channel = args.get("channel").and_then(|v| v.as_str());
-        let project = args.get("project").and_then(|v| v.as_str());
-        let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(100) as i32;
-        self.persistent_event_bus
-            .poll(since, channel, project, limit)
-            .map(|events| json!({ "events": events, "count": events.len() }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_event_ack(&self, args: &Value) -> Result<Value, String> {
-        let event_id = args["event_id"].as_i64().ok_or("Missing event_id")?;
-        self.persistent_event_bus
-            .mark_read(event_id)
-            .map(|_| json!({ "status": "acked" }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_get_pending_messages(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        self.persistent_event_bus
-            .get_pending_messages(session_id)
-            .map(|messages| json!({ "messages": messages, "count": messages.len() }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_broadcast(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args["session_id"].as_str().unwrap_or("");
-        let content = args["content"].as_str().unwrap_or("");
-        let project = args.get("project").and_then(|v| v.as_str());
-        let channel = args
-            .get("channel")
-            .and_then(|v| v.as_str())
-            .unwrap_or("global");
-        let priority = args.get("priority").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let event_type = args
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("broadcast");
-        self.persistent_event_bus
-            .broadcast(event_type, session_id, project, channel, content, priority)
-            .map(|id| json!({ "event_id": id, "status": "sent" }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_plugin_load(&self, args: &Value) -> Result<Value, String> {
-        let path = args["path"].as_str().unwrap_or("");
-        self.plugin_manager
-            .load_plugin(path)
-            .map(|id| json!({ "plugin_id": id }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_plugin_unload(&self, args: &Value) -> Result<Value, String> {
-        let plugin_id = args["plugin_id"].as_str().unwrap_or("");
-        self.plugin_manager
-            .unload_plugin(plugin_id)
-            .map(|_| json!({ "status": "unloaded" }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_plugin_list(&self, _args: &Value) -> Result<Value, String> {
-        Ok(json!(self.plugin_manager.get_plugins()))
-    }
-
-    fn action_plugin_info(&self, args: &Value) -> Result<Value, String> {
-        let plugin_id = args["plugin_id"].as_str().unwrap_or("");
-        self.plugin_manager
-            .get_plugin(plugin_id)
-            .map(|info| json!(info))
-            .ok_or_else(|| "Plugin not found".to_string())
-    }
-
-    fn action_plugin_enable(&self, args: &Value) -> Result<Value, String> {
-        let plugin_id = args["plugin_id"].as_str().unwrap_or("");
-        let enabled = args["enabled"].as_bool().unwrap_or(true);
-        self.plugin_manager
-            .set_plugin_enabled(plugin_id, enabled)
-            .map(|_| json!({ "status": if enabled { "enabled" } else { "disabled" } }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_plugin_disable(&self, args: &Value) -> Result<Value, String> {
-        let plugin_id = args["plugin_id"].as_str().unwrap_or("");
-        self.plugin_manager
-            .set_plugin_enabled(plugin_id, false)
-            .map(|_| json!({ "status": "disabled" }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn action_plugin_health(&self, args: &Value) -> Result<Value, String> {
-        let plugin_id = args["plugin_id"].as_str();
-        let health = self.plugin_manager.health_check();
-        if let Some(pid) = plugin_id {
-            health
-                .get(pid)
-                .map(|r| json!(r))
-                .ok_or_else(|| "Plugin not found".to_string())
-        } else {
-            Ok(json!(health))
-        }
-    }
-
-    fn action_plugin_update_check(&self, _args: &Value) -> Result<Value, String> {
-        Ok(json!(self.plugin_manager.check_for_updates()))
-    }
-
-    fn action_plugin_cleanup(&self, args: &Value) -> Result<Value, String> {
-        let max_age = args["max_age_seconds"].as_i64().unwrap_or(86400);
-        let removed = self.plugin_manager.cleanup_unused_plugins(max_age);
-        Ok(json!({ "removed": removed }))
-    }
-
-    fn action_db_health(&self, _args: &Value) -> Result<Value, String> {
-        Ok(self.db.db_health())
-    }
-
-    fn action_feasibility_analyze(&self, args: &Value) -> Result<Value, String> {
-        feasibility_tools::handle_feasibility_analyze(args)
-    }
-
-    fn action_market_trends(&self, args: &Value) -> Result<Value, String> {
-        feasibility_tools::handle_market_trends(args)
-    }
-
-    fn action_tech_plan(&self, args: &Value) -> Result<Value, String> {
-        feasibility_tools::handle_tech_plan(args)
-    }
-
-    fn action_connection_status(&self, _args: &Value) -> Result<Value, String> {
-        let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
-        let mut status_list = Vec::new();
-        for (id, conn) in connections.iter_mut() {
-            let elapsed = conn.last_activity.elapsed();
-            conn.status = if elapsed < Duration::from_secs(30) {
-                ConnectionStatus::Connected
-            } else {
-                ConnectionStatus::Idle
-            };
-            status_list.push(json!({
-                "id": id,
-                "client": conn.client_name,
-                "status": format!("{:?}", conn.status),
-                "last_activity": format!("{}s ago", elapsed.as_secs()),
-                "protocol": conn.protocol
-            }));
-        }
-        Ok(json!(status_list))
-    }
-
-    fn action_mem_context(&self, args: &Value) -> Result<Value, String> {
-        let project = args
-            .get("project")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default");
-        let mut context = serde_json::Map::new();
-
-        if let Ok(Some(global)) = self.db.get_global_context(project) {
-            context.insert("global_context".to_string(), json!(global));
-        }
-
-        if let Ok(chunks) = self.db.get_chunks_by_project(project, None) {
-            context.insert("knowledge_chunks".to_string(), json!(chunks));
-        }
-
-        Ok(json!(context))
-    }
-
-    fn action_mem_lock_acquire(&self, args: &Value) -> Result<Value, String> {
-        let session_id = args
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let lock_key = args
-            .get("resource")
-            .or_else(|| args.get("lock_key"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("global");
-        let ttl = args
-            .get("ttl_seconds")
-            .or_else(|| args.get("ttl_secs"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(60);
-
-        match self
-            .db
-            .acquire_lock(session_id, lock_key, "generic", None, ttl)
-        {
-            Ok(success) => Ok(json!({ "success": success, "lock_key": lock_key })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_mem_lock_release(&self, args: &Value) -> Result<Value, String> {
-        let lock_key = args
-            .get("resource")
-            .or_else(|| args.get("lock_key"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("global");
-        match self.db.release_lock(lock_key) {
-            Ok(_) => Ok(json!({ "success": true })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_task_complete(&self, args: &Value) -> Result<Value, String> {
-        let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-        let success = args
-            .get("success")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-        let result = args.get("result").and_then(|v| v.as_str());
-
-        self.orchestrator.complete_task(task_id, success);
-        match self.db.complete_task(task_id, result, None) {
-            Ok(_) => Ok(json!({ "success": true, "task_id": task_id })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn action_task_delegate(&self, args: &Value) -> Result<Value, String> {
-        let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-        let from_agent = args
-            .get("from_agent")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        match self.orchestrator.delegate_task(task_id, from_agent) {
-            Some(to_agent) => Ok(json!({ "success": true, "delegated_to": to_agent })),
-            None => Err("No suitable agent found for delegation".to_string()),
-        }
-    }
-
-    fn action_task_request(&self, args: &Value) -> Result<Value, String> {
-        let skills: Vec<String> = args
-            .get("skills")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|s| s.as_str())
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        match self.orchestrator.find_best_agent(&skills) {
-            Some(agent_id) => Ok(json!({ "agent_id": agent_id })),
-            None => Ok(json!(null)),
-        }
-    }
-
-    fn action_task_audit(&self, args: &Value) -> Result<Value, String> {
-        let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-        let auditor = args
-            .get("auditor_session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let status = args
-            .get("audit_status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("approved");
-        let notes = args.get("audit_notes").and_then(|v| v.as_str());
-
-        match self.db.audit_task(task_id, auditor, status, notes) {
-            Ok(_) => Ok(json!({ "success": true, "task_id": task_id })),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    // --- M.A.T.E.R.I.A. NUM-JEPA Actions (Pure Rust) ---
-
-    fn action_kino_predict(&self, args: &Value) -> Result<Value, String> {
-        let top = args.get("top").and_then(|v| v.as_i64()).unwrap_or(10);
-        let _arch = args.get("arch").and_then(|v| v.as_bool()).unwrap_or(false);
-
-        let plugins = self.plugin_manager.get_plugins();
-        let kino_loaded = plugins.iter().any(|p| {
-            p.id.contains("kino") || p.name.contains("kino") || p.description.contains("num-jepa")
-        });
-
-        if kino_loaded {
-            Ok(json!({
-                "status": "prediction_ready",
-                "top": top,
-                "engine": "NUM-JEPA (Rust native)",
-                "message": "Kino plugin loaded via synapsis-kino-plugin dynamic library. Prediction available at plugin interface."
-            }))
-        } else {
-            Ok(json!({
-                "status": "plugin_not_loaded",
-                "engine": "NUM-JEPA",
-                "message": "Kino plugin (synapsis-kino-plugin) is compiled as a native Rust cdylib. Load via plugin_load tool with path to libsynapsis_kino_plugin.so"
-            }))
-        }
-    }
-
-    fn action_kino_train(&self, args: &Value) -> Result<Value, String> {
-        let epochs = args.get("epochs").and_then(|v| v.as_i64()).unwrap_or(100);
-        Ok(json!({
-            "status": "scheduled",
-            "engine": "NUM-JEPA (Rust)",
-            "epochs": epochs,
-            "message": "Training dispatched via native Rust plugin system. Use kino_stats to monitor progress."
-        }))
-    }
-
-    fn action_kino_stats(&self, _args: &Value) -> Result<Value, String> {
-        Ok(json!({
-            "engine": "NUM-JEPA v2.0.0 (Rust native)",
-            "model": "kino-predictor-arch-v3",
-            "framework": "synapsis-kino-plugin (cdylib)",
-            "status": "ready",
-            "message": "Built entirely in Rust. No Python dependency."
-        }))
-    }
-
-    fn action_materia_status(&self, _args: &Value) -> Result<Value, String> {
-        Ok(json!({
-            "engine": "M.A.T.E.R.I.A.",
-            "version": "2.0.0",
-            "backend": "Rust native",
-            "status": "operational",
-            "modules_loaded": self.plugin_manager.get_plugins().len(),
-            "message": "M.A.T.E.R.I.A. engine runs on pure Rust. No Python required."
-        }))
-    }
-
-    fn action_system_resources(&self, args: &Value) -> Result<Value, String> {
-        let _ = args;
-
-        use sysinfo::System;
-        let mut sys = System::new_all();
-        sys.refresh_all();
-
-        let mut result = serde_json::Map::new();
-
-        // CPU info via sysinfo
-        result.insert(
-            "cpu_cores".to_string(),
-            Value::Number(serde_json::Number::from(sys.cpus().len())),
-        );
-        let cpu_usage: f64 = sys.cpus().iter().map(|c| c.cpu_usage() as f64).sum::<f64>()
-            / sys.cpus().len().max(1) as f64;
-        result.insert(
-            "cpu_usage_pct".to_string(),
-            Value::Number(
-                serde_json::Number::from_f64((cpu_usage * 10.0).round() / 10.0)
-                    .unwrap_or(serde_json::Number::from(0)),
-            ),
-        );
-
-        // RAM info via sysinfo
-        let total_mb = sys.total_memory() / 1024 / 1024;
-        let used_mb = sys.used_memory() / 1024 / 1024;
-        let free_mb = sys.free_memory() / 1024 / 1024;
-        result.insert(
-            "ram_total_mb".to_string(),
-            Value::Number(serde_json::Number::from(total_mb)),
-        );
-        result.insert(
-            "ram_used_mb".to_string(),
-            Value::Number(serde_json::Number::from(used_mb)),
-        );
-        result.insert(
-            "ram_free_mb".to_string(),
-            Value::Number(serde_json::Number::from(free_mb)),
-        );
-        let ram_pct = if total_mb > 0 {
-            (used_mb as f64 / total_mb as f64 * 100.0) as u64
-        } else {
-            0
-        };
-        result.insert(
-            "ram_usage_pct".to_string(),
-            Value::Number(serde_json::Number::from(ram_pct)),
-        );
-
-        // Swap
-        let swap_total = sys.total_swap() / 1024 / 1024;
-        let swap_used = sys.used_swap() / 1024 / 1024;
-        result.insert(
-            "swap_total_mb".to_string(),
-            Value::Number(serde_json::Number::from(swap_total)),
-        );
-        result.insert(
-            "swap_used_mb".to_string(),
-            Value::Number(serde_json::Number::from(swap_used)),
-        );
-
-        // System info
-        result.insert(
-            "system_name".to_string(),
-            Value::String(System::name().unwrap_or_else(|| "unknown".to_string())),
-        );
-        result.insert(
-            "kernel_version".to_string(),
-            Value::String(System::kernel_version().unwrap_or_else(|| "unknown".to_string())),
-        );
-        result.insert(
-            "hostname".to_string(),
-            Value::String(System::host_name().unwrap_or_else(|| "unknown".to_string())),
-        );
-
-        // Uptime (hours)
-        let uptime_h = (System::uptime() as f64 / 3600.0 * 10.0).round() / 10.0;
-        result.insert(
-            "uptime_hours".to_string(),
-            Value::Number(
-                serde_json::Number::from_f64(uptime_h).unwrap_or(serde_json::Number::from(0)),
-            ),
-        );
-
-        // GPU info via nvidia-smi (sysinfo doesn't support GPUs)
-        if let Some(gpu) = std::process::Command::new("nvidia-smi")
-            .args([
-                "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu",
-                "--format=csv,noheader,nounits",
-            ])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-        {
-            let mut gpus = Vec::new();
-            for line in gpu.lines() {
-                let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-                if parts.len() >= 6 {
-                    let mut gpu_obj = serde_json::Map::new();
-                    gpu_obj.insert("id".to_string(), Value::String(parts[0].to_string()));
-                    gpu_obj.insert("name".to_string(), Value::String(parts[1].to_string()));
-                    if let Ok(mem_used) = parts[2].parse::<f64>() {
-                        gpu_obj.insert(
-                            "memory_used_mb".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(mem_used)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
-                    }
-                    if let Ok(mem_total) = parts[3].parse::<f64>() {
-                        gpu_obj.insert(
-                            "memory_total_mb".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(mem_total)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
-                    }
-                    if let Ok(util_gpu) = parts[4].parse::<f64>() {
-                        gpu_obj.insert(
-                            "gpu_utilization_pct".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(util_gpu)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
-                    }
-                    if let Ok(temp) = parts[5].parse::<f64>() {
-                        gpu_obj.insert(
-                            "temperature_c".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(temp)
-                                    .unwrap_or(serde_json::Number::from(0)),
-                            ),
-                        );
-                    }
-                    gpus.push(Value::Object(gpu_obj));
-                }
-            }
-            result.insert("gpus".to_string(), Value::Array(gpus));
-        }
-
-        Ok(Value::Object(result))
-    }
-
-    fn action_resource_snapshot(&self, _args: &Value) -> Result<Value, String> {
-        let snap = self.resource_monitor.snapshot();
-        Ok(json!({
-            "cpu_cores": snap.cpu_cores,
-            "cpu_usage_pct": snap.cpu_usage_pct,
-            "ram_total_mb": snap.ram_total_mb,
-            "ram_used_mb": snap.ram_used_mb,
-            "ram_free_mb": snap.ram_free_mb,
-            "load_level": format!("{:?}", snap.load_level),
-            "throttle_delay_ms": self.resource_monitor.throttle_delay().as_millis(),
-        }))
-    }
-
-    fn action_resource_limits(&self, args: &Value) -> Result<Value, String> {
-        if let Some(max_agents) = args.get("max_agents").and_then(|v| v.as_u64()) {
-            let mut limits = self.resource_monitor.get_limits();
-            limits.max_concurrent_agents = max_agents as usize;
-            self.resource_monitor.set_limits(limits);
-        }
-        if let Some(cpu_pct) = args.get("cpu_threshold_pct").and_then(|v| v.as_f64()) {
-            let mut limits = self.resource_monitor.get_limits();
-            limits.cpu_threshold_pct = cpu_pct;
-            self.resource_monitor.set_limits(limits);
-        }
-        if let Some(ram_mb) = args.get("ram_threshold_mb").and_then(|v| v.as_u64()) {
-            let mut limits = self.resource_monitor.get_limits();
-            limits.ram_threshold_mb = ram_mb;
-            self.resource_monitor.set_limits(limits);
-        }
-        if let Some(delay_ms) = args.get("throttle_delay_ms").and_then(|v| v.as_u64()) {
-            let mut limits = self.resource_monitor.get_limits();
-            limits.throttle_delay_ms = delay_ms;
-            self.resource_monitor.set_limits(limits);
-        }
-        let limits = self.resource_monitor.get_limits();
-        Ok(json!({
-            "max_concurrent_agents": limits.max_concurrent_agents,
-            "max_tasks_per_agent": limits.max_tasks_per_agent,
-            "cpu_threshold_pct": limits.cpu_threshold_pct,
-            "ram_threshold_mb": limits.ram_threshold_mb,
-            "throttle_delay_ms": limits.throttle_delay_ms,
-        }))
     }
 }

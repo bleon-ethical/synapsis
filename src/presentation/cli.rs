@@ -164,7 +164,7 @@ impl CLI {
         }
 
         let mut obs =
-            Observation::new(SessionId::new(session_id), obs_type, title.clone(), content);
+            Observation::new(SessionId::new(&session_id), obs_type.clone(), title.clone(), content);
         obs.project = project;
 
         match self.db.save_observation(&obs) {
@@ -238,7 +238,8 @@ impl CLI {
             obs_type,
             project,
             scope: None,
-            limit,
+            limit: Some(limit as i64),
+            ..Default::default()
         };
 
         let results = self.db.search_observations(&params).map_err(|e| {

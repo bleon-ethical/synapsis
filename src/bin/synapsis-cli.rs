@@ -18,7 +18,7 @@ fn main() {
         "save" => {
             let content = args[2..].join(" ");
             let obs = Observation::new(
-                SessionId::new("cli".to_string()),
+                SessionId::new("cli"),
                 ObservationType::Manual,
                 "memory".to_string(),
                 content,

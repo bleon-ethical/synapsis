@@ -126,10 +126,12 @@ pub fn manual_cleanup(
     timeout_secs: u64,
 ) -> Result<synapsis_core::core::session_cleanup::CleanupStats, String> {
     let config = SessionCleanupConfig {
-        session_timeout_secs: timeout_secs,
+        session_timeout_secs: timeout_secs as i64,
         cleanup_interval_secs: 60,
         require_heartbeat: true,
         auto_end_sessions: true,
+        max_age_secs: timeout_secs as i64,
+        interval_secs: 60,
     };
 
     let cleanup_job = SessionCleanupJob::new(db.clone(), config);

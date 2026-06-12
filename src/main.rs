@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("╚══════════════════════════════════════════════════════════╝");
             eprintln!();
 
-            server.run()?;
+            server.run().await?;
         }
         synapsis::cli::Command::Help(opts) => {
             synapsis::cli::print_help(opts.command.as_deref());

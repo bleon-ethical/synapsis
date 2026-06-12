@@ -1,6 +1,7 @@
 // CRYSTALS-Dilithium Digital Signature Module
 // Provides post-quantum digital signatures using CRYSTALS-Dilithium
 // NIST Level 1 security (Dilithium2)
+// NOTE: This file is included only when `cfg(feature = "pqc")` is enabled via app_core/mod.rs
 
 use pqcrypto_dilithium::dilithium2;
 use pqcrypto_traits::sign::{PublicKey, SecretKey, SignedMessage};

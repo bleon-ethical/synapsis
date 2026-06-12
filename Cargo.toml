@@ -7,7 +7,8 @@ description = "Persistent memory engine for AI agents with PQC security"
 license = "MIT"
 
 [features]
-default = ["security"]
+default = []
+pqc = ["pqcrypto-traits", "pqcrypto-kyber", "pqcrypto-dilithium"]
 security = []
 tui = []
 browser = ["dep:headless_chrome"]
@@ -60,10 +61,10 @@ getrandom = "0.2"
 lazy_static = "1.4"
 hex = "0.4"
 
-# PQC
-pqcrypto-traits = "0.3.5"
-pqcrypto-kyber = "0.8.1"
-pqcrypto-dilithium = "0.5.0"
+# PQC (optional - enable with `pqc` feature)
+pqcrypto-traits = { version = "0.3.5", optional = true }
+pqcrypto-kyber = { version = "0.8.1", optional = true }
+pqcrypto-dilithium = { version = "0.5.0", optional = true }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
