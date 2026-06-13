@@ -22,7 +22,7 @@ jobs:
       with:
         components: clippy, rustfmt
     - name: Build
-      run: cargo build --verbose
+      run: cargo build
     - name: Run tests
       run: cargo test
     - name: Run clippy
