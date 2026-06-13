@@ -51,9 +51,13 @@ impl Database {
     }
 
     pub fn new_with_key(encryption_key: Option<Vec<u8>>) -> Self {
-        let data_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("synapsis");
+        let data_dir = std::env::var("SYNAPSIS_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                dirs::data_local_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("synapsis")
+            });
 
         std::fs::create_dir_all(&data_dir).ok();
         let db_path = data_dir.join("synapsis.db");
