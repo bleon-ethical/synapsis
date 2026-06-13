@@ -1,67 +1,27 @@
-//! Synapsis Main Entry Point
+//! Synapsis - Unified MCP Server
 //!
-//! Unified CLI that handles MCP server, memory operations, and self-updates.
+//! Starts the MCP server with HTTP/SSE transport for multi-agent coordination.
+//! All agent communication happens via standard MCP protocol - no raw TCP.
 
 use std::sync::Arc;
-use synapsis::app_core::updater::AutoUpdater;
-use synapsis::presentation::mcp::McpServer;
-use synapsis_core::core::orchestrator::Orchestrator;
-use synapsis_core::infrastructure::database::Database;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+fn main() {
+    let port: u16 = std::env::var("SYNAPSIS_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(7438);
 
-    // Parse global config and command
-    let mut parser = synapsis::cli::ArgParser::new(&args);
-    let (_config, command) = match parser.parse_all() {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            synapsis::cli::print_help(None);
-            std::process::exit(1);
-        }
-    };
+    eprintln!("╔══════════════════════════════════════════════════════════╗");
+    eprintln!("║  Synapsis v{} - Multi-Agent MCP Server            ║", env!("CARGO_PKG_VERSION"));
+    eprintln!("║  Transport: HTTP/SSE (port {})                       ║", port);
+    eprintln!("║  Multi-Agent: enabled                                  ║");
+    eprintln!("╚══════════════════════════════════════════════════════════╝");
 
-    // Shared components
-    let db = Arc::new(Database::new());
-    let orchestrator = Arc::new(Orchestrator::new());
+    let db = Arc::new(synapsis::infrastructure::database::Database::new());
+    let orchestrator = Arc::new(synapsis::core::orchestrator::Orchestrator::new());
+    let server = Arc::new(synapsis::presentation::mcp::McpServer::new(db, orchestrator));
+    server.init();
 
-    match command {
-        synapsis::cli::Command::Update => {
-            let updater = AutoUpdater::new(db.clone());
-            println!("🚀 Checking for updates...");
-            match updater.perform_update() {
-                Ok(_) => println!("✅ Synapsis is up to date."),
-                Err(e) => eprintln!("❌ Update failed: {}", e),
-            }
-        }
-        synapsis::cli::Command::Mcp(_opts) => {
-            let server = McpServer::new(db.clone(), orchestrator.clone());
-            server.init();
-
-            eprintln!("╔══════════════════════════════════════════════════════════╗");
-            eprintln!(
-                "║  Synapsis v{} - MCP Server                           ║",
-                env!("CARGO_PKG_VERSION")
-            );
-            eprintln!("║  Mode: Pure stdio (Standard)                        ║");
-            eprintln!("╚══════════════════════════════════════════════════════════╝");
-            eprintln!();
-
-            server.run().await?;
-        }
-        synapsis::cli::Command::Help(opts) => {
-            synapsis::cli::print_help(opts.command.as_deref());
-        }
-        _ => {
-            // Placeholder for other commands (save, search, etc.)
-            // Most of these are already handled in synapsis-core/src/api/cli
-            eprintln!(
-                "Command not yet fully integrated in unified binary. Use synapsis-mcp for now."
-            );
-        }
-    }
-
-    Ok(())
+    let transport = synapsis::presentation::http::HttpTransport::new(server);
+    transport.start(port);
 }

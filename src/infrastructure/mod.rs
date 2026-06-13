@@ -1,3 +1,11 @@
+//! Synapsis Infrastructure Module
+
+pub mod agents;
+pub mod context;
 pub mod database;
-pub mod cache;
-pub use synapsis_core::infrastructure::database::Database;
+pub mod event_bus;
+pub mod shared_state;
+pub mod skills;
+
+pub use database::*;
+pub use shared_state::*;

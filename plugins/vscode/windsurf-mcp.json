@@ -2,8 +2,7 @@
   "mcpServers": {
     "synapsis": {
       "type": "stdio",
-      "command": "synapsis",
-      "args": ["mcp"],
+      "command": "synapsis-mcp",
       "env": {
         "SYNAPSIS_PROJECT": "${workspaceFolder}"
       }

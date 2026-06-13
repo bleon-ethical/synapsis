@@ -1,13 +1,12 @@
 //! Synapsis TUI - Minimal terminal UI
 
-use crate::SynapsisError;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use synapsis_core::core::orchestrator::Orchestrator;
-use synapsis_core::domain::{
+use crate::domain::{
     entities::{Observation, SearchParams, SessionSummary},
     ports::{SessionPort, StoragePort},
 };
+use crate::SynapsisError;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TuiCommand {
@@ -22,7 +21,6 @@ pub enum TuiCommand {
 pub struct Tui {
     pub storage: Arc<dyn StoragePort>,
     pub sessions: Arc<dyn SessionPort>,
-    pub orchestrator: Option<Arc<Orchestrator>>,
     pub state: TuiState,
 }
 
@@ -34,23 +32,13 @@ pub struct TuiState {
     pub search_query: String,
     pub search_results: Vec<Observation>,
     pub selected_index: usize,
-    pub scroll_offset: usize,
     pub input_buffer: String,
     pub message: Option<String>,
     pub stats: Option<TuiStats>,
-    pub agents: Vec<AgentInfo>,
-    pub tasks: Vec<TaskInfo>,
-    pub connection_status: ConnectionStatus,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ConnectionStatus {
-    pub mcp_connected: bool,
-    pub active_agents: usize,
-    pub pending_tasks: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum AppMode {
     #[default]
     Timeline,
@@ -58,11 +46,9 @@ pub enum AppMode {
     Search,
     Sessions,
     Stats,
-    Agents,
-    Tasks,
-    Connection,
     ConfirmQuit,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuiStats {
@@ -71,34 +57,11 @@ pub struct TuiStats {
     pub storage_size_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentInfo {
-    pub agent_type: String,
-    pub session_id: String,
-    pub project: String,
-    pub status: String,
-    pub last_heartbeat: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskInfo {
-    pub id: String,
-    pub title: String,
-    pub assigned_to: Option<String>,
-    pub status: String,
-    pub created_at: i64,
-}
-
 impl Tui {
-    pub fn new(
-        storage: Arc<dyn StoragePort>,
-        sessions: Arc<dyn SessionPort>,
-        orchestrator: Option<Arc<Orchestrator>>,
-    ) -> Self {
+    pub fn new(storage: Arc<dyn StoragePort>, sessions: Arc<dyn SessionPort>) -> Self {
         Self {
             storage,
             sessions,
-            orchestrator,
             state: TuiState::default(),
         }
     }
@@ -108,14 +71,14 @@ impl Tui {
         Err(Box::new(SynapsisError::internal_unimplemented()))
     }
 
-    fn refresh_data(&mut self) -> synapsis_core::domain::errors::Result<()> {
+    fn refresh_data(&mut self) -> crate::domain::errors::Result<()> {
         let entries = self.storage.get_timeline(1000)?;
         self.state.observations = entries.into_iter().map(|e| e.observation).collect();
         self.state.selected_index = 0;
         Ok(())
     }
 
-    fn perform_search(&mut self) -> synapsis_core::domain::errors::Result<()> {
+    fn perform_search(&mut self) -> crate::domain::errors::Result<()> {
         let params = SearchParams::new(&self.state.search_query).with_limit(50);
         let results = self.storage.search_observations(&params)?;
         self.state.search_results = results.into_iter().map(|r| r.observation).collect();
@@ -123,7 +86,7 @@ impl Tui {
         Ok(())
     }
 
-    fn calculate_stats(&mut self) -> synapsis_core::domain::errors::Result<()> {
+    fn calculate_stats(&mut self) -> crate::domain::errors::Result<()> {
         let entries = self.storage.get_timeline(0)?;
         let sessions = self.sessions.list_sessions()?;
 
@@ -144,97 +107,13 @@ impl Tui {
 
         Ok(())
     }
-
-    pub fn update_connection_status(&mut self, mcp: bool, agents: usize, tasks: usize) {
-        self.state.connection_status = ConnectionStatus {
-            mcp_connected: mcp,
-            active_agents: agents,
-            pending_tasks: tasks,
-        };
-    }
-
-    pub fn refresh_agents_from_orchestrator(&mut self) {
-        if let Some(orch) = &self.orchestrator {
-            let status = orch.get_system_status();
-            if let Some(agents_array) = status.get("agents").and_then(|a| a.as_array()) {
-                self.state.agents = agents_array
-                    .iter()
-                    .filter_map(|a| {
-                        Some(AgentInfo {
-                            agent_type: a.get("agent_type")?.as_str()?.to_string(),
-                            session_id: a.get("id")?.as_str()?.to_string(),
-                            project: a
-                                .get("project")
-                                .and_then(|p| p.as_str())
-                                .unwrap_or("unknown")
-                                .to_string(),
-                            status: format!(
-                                "{:?}",
-                                a.get("status")
-                                    .and_then(|s| s.get("Idle"))
-                                    .unwrap_or(&serde_json::json!("Idle"))
-                            ),
-                            last_heartbeat: a.get("last_heartbeat")?.as_i64()?,
-                        })
-                    })
-                    .collect();
-            }
-        }
-        self.state.selected_index = 0;
-    }
-
-    pub fn refresh_tasks_from_orchestrator(&mut self) {
-        if let Some(orch) = &self.orchestrator {
-            let pending = orch.get_pending_tasks();
-            self.state.tasks = pending
-                .into_iter()
-                .map(|t| TaskInfo {
-                    id: t.id,
-                    title: t.description,
-                    assigned_to: t.assigned_to,
-                    status: format!("{:?}", t.status),
-                    created_at: t.created_at,
-                })
-                .collect();
-        }
-        self.state.selected_index = 0;
-    }
-
-    pub fn update_connection_from_orchestrator(&mut self) {
-        if let Some(orch) = &self.orchestrator {
-            let status = orch.get_system_status();
-            let active_agents = status
-                .get("active_agents")
-                .and_then(|a| a.as_u64())
-                .unwrap_or(0) as usize;
-            let pending_tasks = orch.get_pending_tasks().len();
-
-            self.state.connection_status = ConnectionStatus {
-                mcp_connected: true,
-                active_agents,
-                pending_tasks,
-            };
-        }
-    }
-
-    pub fn refresh_agents(&mut self, agents: Vec<AgentInfo>) {
-        self.state.agents = agents;
-        self.state.selected_index = 0;
-    }
-
-    pub fn refresh_tasks(&mut self, tasks: Vec<TaskInfo>) {
-        self.state.tasks = tasks;
-        self.state.selected_index = 0;
-    }
 }
 
 #[cfg(feature = "tui")]
 mod tui_impl {
     use super::*;
     use crossterm::{
-        event::{
-            self, DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind, KeyModifiers,
-        },
+        event::{self, DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind},
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     };
@@ -246,17 +125,11 @@ mod tui_impl {
         Frame, Terminal,
     };
     use std::io;
-    use std::io::Write;
 
     impl Tui {
         pub fn run(&mut self) -> std::result::Result<(), Box<dyn std::error::Error>> {
             enable_raw_mode()?;
             let mut stdout = io::stdout();
-
-            // Set terminal window title for Hyprland window rules (ANSI escape sequence)
-            print!("\x1b]2;Synapsis TUI\x07");
-            io::stdout().flush().unwrap_or(());
-
             execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
             let backend = CrosstermBackend::new(stdout);
             let mut terminal = Terminal::new(backend)?;
@@ -280,7 +153,7 @@ mod tui_impl {
         fn run_internal(
             &mut self,
             terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        ) -> synapsis_core::domain::errors::Result<()> {
+        ) -> crate::domain::errors::Result<()> {
             self.refresh_data()?;
 
             loop {
@@ -288,7 +161,6 @@ mod tui_impl {
 
                 if let event::Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press {
-                        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                         match self.state.mode {
                             AppMode::Timeline => match key.code {
                                 KeyCode::Char('q') => self.state.mode = AppMode::ConfirmQuit,
@@ -314,33 +186,6 @@ mod tui_impl {
                                 KeyCode::Char('S') => {
                                     self.state.mode = AppMode::Stats;
                                     self.calculate_stats().ok();
-                                }
-                                KeyCode::Char('g') => {
-                                    self.state.mode = AppMode::Agents;
-                                }
-                                KeyCode::Char('T') => {
-                                    self.state.mode = AppMode::Tasks;
-                                }
-                                KeyCode::Char('c') => {
-                                    self.state.mode = AppMode::Connection;
-                                }
-                                KeyCode::Char('G') => {
-                                    if !self.state.observations.is_empty() {
-                                        self.state.selected_index =
-                                            self.state.observations.len() - 1;
-                                    }
-                                }
-                                KeyCode::Char('0') => {
-                                    self.state.selected_index = 0;
-                                }
-                                KeyCode::Char('d') if ctrl => {
-                                    let max = self.state.observations.len().saturating_sub(1);
-                                    self.state.selected_index =
-                                        (self.state.selected_index + 10).min(max);
-                                }
-                                KeyCode::Char('u') if ctrl => {
-                                    self.state.selected_index =
-                                        self.state.selected_index.saturating_sub(10);
                                 }
                                 KeyCode::Up | KeyCode::Char('k') => {
                                     if self.state.selected_index > 0 {
@@ -430,94 +275,6 @@ mod tui_impl {
                                 }
                                 _ => {}
                             },
-                            AppMode::Agents => match key.code {
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.state.mode = AppMode::Timeline;
-                                }
-                                KeyCode::Up | KeyCode::Char('k') => {
-                                    if self.state.selected_index > 0 {
-                                        self.state.selected_index -= 1;
-                                    }
-                                }
-                                KeyCode::Down | KeyCode::Char('j') => {
-                                    let max = self.state.agents.len().saturating_sub(1);
-                                    if self.state.selected_index < max {
-                                        self.state.selected_index += 1;
-                                    }
-                                }
-                                KeyCode::Char('r') => {
-                                    self.refresh_agents_from_orchestrator();
-                                    self.state.message = Some(format!(
-                                        "Refreshed {} agents",
-                                        self.state.agents.len()
-                                    ));
-                                }
-                                _ => {}
-                            },
-                            AppMode::Tasks => match key.code {
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.state.mode = AppMode::Timeline;
-                                }
-                                KeyCode::Up | KeyCode::Char('k') => {
-                                    if self.state.selected_index > 0 {
-                                        self.state.selected_index -= 1;
-                                    }
-                                }
-                                KeyCode::Down | KeyCode::Char('j') => {
-                                    let max = self.state.tasks.len().saturating_sub(1);
-                                    if self.state.selected_index < max {
-                                        self.state.selected_index += 1;
-                                    }
-                                }
-                                KeyCode::Char('r') => {
-                                    self.refresh_tasks_from_orchestrator();
-                                    self.state.message =
-                                        Some(format!("Refreshed {} tasks", self.state.tasks.len()));
-                                }
-                                _ => {}
-                            },
-                            AppMode::Connection => match key.code {
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.state.mode = AppMode::Timeline;
-                                }
-                                KeyCode::Char('r') => {
-                                    self.update_connection_from_orchestrator();
-                                    self.state.message =
-                                        Some("Connection status refreshed".to_string());
-                                }
-                                _ => {}
-                            },
-                            AppMode::Tasks => match key.code {
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.state.mode = AppMode::Timeline;
-                                }
-                                KeyCode::Up | KeyCode::Char('k') => {
-                                    if self.state.selected_index > 0 {
-                                        self.state.selected_index -= 1;
-                                    }
-                                }
-                                KeyCode::Down | KeyCode::Char('j') => {
-                                    let max = self.state.tasks.len().saturating_sub(1);
-                                    if self.state.selected_index < max {
-                                        self.state.selected_index += 1;
-                                    }
-                                }
-                                KeyCode::Char('r') => {
-                                    self.state.message =
-                                        Some("Task refresh not implemented yet".to_string());
-                                }
-                                _ => {}
-                            },
-                            AppMode::Connection => match key.code {
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.state.mode = AppMode::Timeline;
-                                }
-                                KeyCode::Char('r') => {
-                                    self.state.message =
-                                        Some("Connection refresh not implemented yet".to_string());
-                                }
-                                _ => {}
-                            },
                             AppMode::ConfirmQuit => {
                                 if let KeyCode::Char('y') | KeyCode::Enter = key.code {
                                     break;
@@ -551,9 +308,6 @@ mod tui_impl {
                 AppMode::Search => self.render_search(f, chunks[1]),
                 AppMode::Sessions => self.render_sessions(f, chunks[1]),
                 AppMode::Stats => self.render_stats(f, chunks[1]),
-                AppMode::Agents => self.render_agents(f, chunks[1]),
-                AppMode::Tasks => self.render_tasks(f, chunks[1]),
-                AppMode::Connection => self.render_connection(f, chunks[1]),
                 AppMode::ConfirmQuit => self.render_confirm_quit(f, chunks[1]),
             }
 
@@ -567,30 +321,25 @@ mod tui_impl {
                 AppMode::Search => "Synapsis - Search",
                 AppMode::Sessions => "Synapsis - Sessions",
                 AppMode::Stats => "Synapsis - Statistics",
-                AppMode::Agents => "Synapsis - Active Agents",
-                AppMode::Tasks => "Synapsis - Tasks",
-                AppMode::Connection => "Synapsis - Connection Status",
                 AppMode::ConfirmQuit => "Synapsis - Confirm Quit",
             };
 
             let help_text = match self.state.mode {
                 AppMode::Timeline => {
-                    "[a]dd  [s]earch  [l]essions  [S]tats  [g]ents  [T]asks  [c]onn  [t]refresh  [q]uit"
+                    "[a]dd  [s]earch  [l]ist sessions  [S]tats  [t]refresh  [q]uit"
                 }
                 AppMode::AddObservation => "[Enter] save  [Esc] cancel",
                 AppMode::Search => "[Enter] search  [Esc] cancel",
                 AppMode::Sessions => "[k/j] navigate  [r] refresh  [q/Esc] back",
                 AppMode::Stats => "[r] refresh  [q/Esc] back",
-                AppMode::Agents => "[r] refresh  [q/Esc] back",
-                AppMode::Tasks => "[r] refresh  [q/Esc] back",
-                AppMode::Connection => "[r] refresh  [q/Esc] back",
                 AppMode::ConfirmQuit => "[y] yes  [n] no",
             };
 
             let block = Block::default()
                 .title(format!(" {} ", title))
                 .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-                .borders(Borders::ALL);
+                .borders(Borders::ALL)
+                .style(Style::new().bg(Color::DarkGray));
 
             f.render_widget(block, area);
 
@@ -647,7 +396,8 @@ mod tui_impl {
         fn render_add_observation(&self, f: &mut Frame, area: Rect) {
             let block = Block::default()
                 .title(" Enter observation ")
-                .borders(Borders::ALL);
+                .borders(Borders::ALL)
+                .style(Style::new().bg(Color::Black));
 
             f.render_widget(block, area);
 
@@ -769,9 +519,9 @@ mod tui_impl {
 
         fn render_stats(&self, f: &mut Frame, area: Rect) {
             if let Some(stats) = &self.state.stats {
-                let obs_count = stats.total_observations.to_string();
-                let sess_count = stats.total_sessions.to_string();
-                let storage_size = format!("{} bytes", stats.storage_size_bytes);
+                let obs_count = stats["total_observations"].as_i64().unwrap_or(0).to_string();
+                let sess_count = stats["total_sessions"].as_i64().unwrap_or(0).to_string();
+                let storage_size = format!("{} bytes", stats["storage_size_bytes"].as_i64().unwrap_or(0));
 
                 let rows = [
                     Row::new(["Total Observations", obs_count.as_str()]),
@@ -794,130 +544,11 @@ mod tui_impl {
             }
         }
 
-        fn render_agents(&self, f: &mut Frame, area: Rect) {
-            if self.state.agents.is_empty() {
-                let text = Paragraph::new(
-                    "No active agents. Press 'r' to refresh or use MCP to connect agents.",
-                )
-                .style(Style::new().fg(Color::Gray));
-                f.render_widget(text, area);
-                return;
-            }
-
-            let items: Vec<ListItem> = self
-                .state
-                .agents
-                .iter()
-                .map(|agent| {
-                    let status_color = if agent.status == "busy" {
-                        "🔴"
-                    } else {
-                        "🟢"
-                    };
-                    let content = format!(
-                        "{} [{}] {} | {} | {}",
-                        status_color,
-                        agent.agent_type,
-                        agent.session_id.split('-').next().unwrap_or("?"),
-                        agent.project,
-                        agent.last_heartbeat
-                    );
-                    ListItem::new(content)
-                })
-                .collect();
-
-            let mut list_state = ListState::default();
-            list_state.select(Some(self.state.selected_index));
-
-            let list = List::new(items)
-                .block(
-                    Block::default()
-                        .title(" Active Agents ")
-                        .borders(Borders::ALL),
-                )
-                .highlight_style(Style::new().bg(Color::Blue).fg(Color::White))
-                .highlight_symbol(">> ");
-
-            f.render_stateful_widget(list, area, &mut list_state);
-        }
-
-        fn render_tasks(&self, f: &mut Frame, area: Rect) {
-            if self.state.tasks.is_empty() {
-                let text = Paragraph::new("No pending tasks. Press 'r' to refresh.")
-                    .style(Style::new().fg(Color::Gray));
-                f.render_widget(text, area);
-                return;
-            }
-
-            let items: Vec<ListItem> = self
-                .state
-                .tasks
-                .iter()
-                .map(|task| {
-                    let status_symbol = match task.status.as_str() {
-                        "pending" => "⏳",
-                        "in_progress" => "🔄",
-                        "completed" => "✅",
-                        "failed" => "❌",
-                        _ => "❓",
-                    };
-                    let content = format!(
-                        "{} [{}] {} | {}",
-                        status_symbol,
-                        task.status,
-                        task.title,
-                        task.assigned_to.as_deref().unwrap_or("unassigned")
-                    );
-                    ListItem::new(content)
-                })
-                .collect();
-
-            let mut list_state = ListState::default();
-            list_state.select(Some(self.state.selected_index));
-
-            let list = List::new(items)
-                .block(Block::default().title(" Tasks ").borders(Borders::ALL))
-                .highlight_style(Style::new().bg(Color::Blue).fg(Color::White))
-                .highlight_symbol(">> ");
-
-            f.render_stateful_widget(list, area, &mut list_state);
-        }
-
-        fn render_connection(&self, f: &mut Frame, area: Rect) {
-            let status = &self.state.connection_status;
-
-            let mcp_status = if status.mcp_connected {
-                "🟢 Connected"
-            } else {
-                "🔴 Disconnected"
-            };
-            let agents_count = status.active_agents.to_string();
-            let tasks_count = status.pending_tasks.to_string();
-
-            let rows = [
-                Row::new(["MCP Server", mcp_status]),
-                Row::new(["Active Agents", &agents_count]),
-                Row::new(["Pending Tasks", &tasks_count]),
-            ];
-
-            let table = Table::new(
-                rows,
-                &[Constraint::Percentage(40), Constraint::Percentage(60)],
-            )
-            .block(
-                Block::default()
-                    .title(" Connection Status ")
-                    .borders(Borders::ALL),
-            )
-            .style(Style::new().fg(Color::White));
-
-            f.render_widget(table, area);
-        }
-
         fn render_confirm_quit(&self, f: &mut Frame, area: Rect) {
             let block = Block::default()
                 .title(" Confirm Quit ")
-                .borders(Borders::ALL);
+                .borders(Borders::ALL)
+                .style(Style::new().bg(Color::Black));
 
             f.render_widget(block, area);
 
@@ -944,7 +575,7 @@ mod tui_impl {
                 )
             };
 
-            let text = Paragraph::new(msg).style(Style::new().fg(Color::Gray));
+            let text = Paragraph::new(msg).style(Style::new().fg(Color::DarkGray));
 
             f.render_widget(text, area);
         }

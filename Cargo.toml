@@ -1,17 +1,14 @@
 [package]
 name = "synapsis"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 authors = ["methodwhite"]
 description = "Persistent memory engine for AI agents with PQC security"
-license = "BUSL-1.1"
+license = "MIT"
 
 [features]
-default = []
-pqc = ["pqcrypto-traits", "pqcrypto-kyber", "pqcrypto-dilithium"]
 security = []
 tui = []
-browser = ["dep:headless_chrome"]
 
 [lib]
 name = "synapsis"
@@ -26,25 +23,18 @@ name = "synapsis-mcp"
 path = "src/bin/mcp.rs"
 
 [[bin]]
-name = "synapsis-cli"
-path = "src/bin/synapsis-cli.rs"
+name = "synapsis-server"
+path = "src/bin/server.rs"
 
-#[[bin]]
-#name = "synapsis-ollama"
-#path = "src/bin/ollama.rs"
-
-#[[bin]]
-#name = "synapsis-http"
-#path = "src/bin/http.rs"
+[[bin]]
+name = "synapsis-ollama"
+path = "src/bin/ollama.rs"
 
 [dependencies]
-# Synapsis Core (library)
-synapsis-core = { path = "../synapsis-core", features = ["full"] }
-
-# Core (duplicated from synapsis-core for presentation layer)
+# Core
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version = "0.31", features = ["bundled-sqlcipher", "blob", "serde_json", "sqlcipher"] }
+rusqlite = { version = "0.31", features = ["bundled", "blob", "serde_json", "sqlcipher"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 thiserror = "1.0"
@@ -61,59 +51,24 @@ getrandom = "0.2"
 lazy_static = "1.4"
 hex = "0.4"
 
-# PQC (optional - enable with `pqc` feature)
-pqcrypto-traits = { version = "0.3.5", optional = true }
-pqcrypto-kyber = { version = "0.8.1", optional = true }
-pqcrypto-dilithium = { version = "0.5.0", optional = true }
+# PQC
+pqcrypto-traits = "0.3"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 regex = "1"
-env_logger = "0.11"
 
 # Async
-tokio = { version = "1.38", features = ["full"] }
-futures = "0.3"
-warp = "0.3"
+tokio = { version = "1", features = ["full"] }
 
 # Crypto
 aes-gcm = "0.10"
 hmac = "0.12"
 sha2 = "0.10"
-sha3 = "0.10"
-chacha20poly1305 = "0.10"
-argon2 = "0.5"
 mdns-sd = "0.11"
-
-# Browser automation
-headless_chrome = { version = "1.0.21", optional = true }
 
 # System monitoring
 sysinfo = "0.38"
 
-# System control
-ctrlc = "3.4"
-libc = "0.2"
-
-# Self update
-self_update = { version = "0.41", features = ["archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate"] }
-
-# Dynamic loading for plugins
-libloading = "0.8"
-
-# TUI (optional) - disabled
-#ratatui = { version = "0.29", optional = true }
-#crossterm = { version = "0.28", optional = true }
-
 [dev-dependencies]
 proptest = "1.4"
-tempfile = "3.10"
-pqcrypto-kyber = "0.8.1"
-pqcrypto-traits = "0.3.5"
-criterion = "0.5"
-sha2 = "0.10"
-hmac = "0.12"
-
-[[bench]]
-name = "kyber_benchmarks"
-harness = false

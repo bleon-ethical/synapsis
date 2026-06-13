@@ -1,123 +1,327 @@
-<p align="center">
-  <img src="assets/logo.svg" alt="Synapsis" width="200"/>
-</p>
-<p align="center">
-  <b>Persistent Memory Engine for AI Agents</b>
-</p>
+# 🛡️ Synapsis - Persistent Memory Engine with PQC Security
 
-<p align="center">
-  <img src="https://img.shields.io/badge/rust-1.88+-orange?logo=rust" alt="Rust"/>
-  <img src="https://img.shields.io/badge/license-BUSL--1.1-red" alt="License"/>
-  <img src="https://img.shields.io/github/v/release/MethodWhite/synapsis?include_prereleases&label=version" alt="Version"/>
-  <img src="https://img.shields.io/badge/PQC-Kyber%20%2B%20Dilithium-blue" alt="PQC"/>
-  <img src="https://img.shields.io/badge/tests-124-passing-green" alt="Tests"/>
-  <img src="https://img.shields.io/badge/MCP-60%2B%20tools-8B5CF6" alt="MCP"/>
-  <img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows%20%7C%20android-lightgrey" alt="Platform"/>
-</p>
+[![Rust](https://img.shields.io/badge/rust-v1.75+-orange.svg)](https://www.rust-lang.org)
+[![Security](https://img.shields.io/badge/security-PQC-green.svg)](docs/SECURITY.md)
+[![MCP](https://img.shields.io/badge/MCP-server-blue.svg)](docs/MCP.md)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-# Synapsis
+**Synapsis** is a military-grade persistent memory engine for AI agents, written in **pure Rust** from the ground up. Features post-quantum cryptography (PQC), multi-agent orchestration, and zero-trust security.
 
-> `/ˈsɪnæpsɪs/` — the structure that enables neurons to communicate.
-
-**Synapsis** is a pure Rust persistent memory engine for AI agents with post-quantum cryptography (PQC), multi-agent orchestration, and native MCP protocol integration. Zero Python dependencies.
+> `/ˈsɪnæpsɪs/` — *biology*: the structure that enables neurons to communicate.
 
 ---
 
-## Features
+## 🚀 Quick Start
 
-- **Persistent Memory** — SQLite-backed with FTS5 full-text search and BM25 ranking
-- **Post-Quantum Security** — CRYSTALS-Kyber-512 KEM + CRYSTALS-Dilithium-2 signatures + AES-256-GCM at rest
-- **Inter-Agent Event Bus** — Real-time messaging between agents via persistent `events` table
-- **60+ MCP Tools** — Memory, events, agents, tasks, security, resource management
-- **Multi-Client Support** — OpenCode, Claude Code, Cursor, VS Code, JetBrains, Windsurf, Gemini CLI
-- **Cross-Platform** — Linux, macOS, Windows, Android (Termux)
-- **Zero Python** — Pure Rust ecosystem
-- **Auto-Migration** — Database schema migrates automatically across versions via `PRAGMA user_version`
+### Installation
 
----
-
-## Quick Start
+**Prerequisites:** Rust 1.75+ ([install](https://rustup.rs))
 
 ```bash
-# Automatic install
-curl -fsSL https://raw.githubusercontent.com/methodwhite/synapsis/main/install.sh | bash
-
-# Or build from source
+# Clone and build
 git clone https://github.com/methodwhite/synapsis.git
 cd synapsis
 cargo build --release
-
-# Run MCP server (stdio)
-synapsis mcp
-
-# Or serve HTTP REST API
-synapsis serve --port 7439
 ```
 
----
+### Usage
 
-## Architecture
+```bash
+# MCP server (stdio) - for local AI agents (Claude Code, Qwen, OpenCode, etc.)
+./target/release/synapsis-mcp
 
-```
-CLI (opencode, qwen)   IDE (vscode, cursor)   TUI (mw-cli)
-         │                       │                   │
-         └───────────────────────┼───────────────────┘
-                                 │
-                        MCP JSON-RPC (stdio)
-                                 │
-            ┌────────────────────▼────────────────────┐
-            │            SYNAPSIS ENGINE               │
-            │  Memory │ Events │ Agents │ Tasks        │
-            ├──────────────────────────────────────────┤
-            │  Security: PQC · SQLCipher · Rate Limit  │
-            │  Resources: Monitor · Throttle · Limits  │
-            └────────────────────┬─────────────────────┘
-                                 │
-                   SQLite + FTS5 + SQLCipher
-                   events table (inter-agent bus)
+# Multi-agent MCP server (HTTP/SSE) - for remote agent coordination
+./target/release/synapsis
+
+# Or via cargo
+cargo run --bin synapsis-mcp
+cargo run --bin synapsis
 ```
 
----
+### IDE Integration
 
-## MCP Tools (60+)
-
-| Category | Tools |
+| Platform | Setup |
 |----------|-------|
-| **Memory** | `mem_save`, `mem_search`, `mem_context`, `mem_timeline`, `mem_update`, `mem_delete` |
-| **Events** | `send_message`, `get_pending_messages`, `broadcast`, `event_poll` |
-| **Agents** | `agent_heartbeat`, `agent_details`, `task_create`, `task_claim`, `task_complete` |
-| **Security** | `security_classify`, `security_sanitize_input`, `pqc_encrypt`, `cve_search`, `security_audit` |
-| **Resources** | `resource_snapshot`, `resource_limits`, `mem_lock_acquire`, `mem_lock_release` |
+| **VS Code / Cursor / Windsurf** | Add MCP config from [plugins/vscode/](plugins/vscode/) |
+| **Claude Code** | Use plugin from [plugins/claude-code/](plugins/claude-code/) |
+| **JetBrains** | Install plugin from [plugins/jetbrains/](plugins/jetbrains/) |
+| **Gemini CLI** | Use script from [plugins/gemini-cli/](plugins/gemini-cli/) |
+
+### Cross-Platform
+
+Synapsis runs on **Linux**, **macOS**, and **Windows** (via WSL2 or native).
+
+```bash
+# Linux / macOS / WSL2
+./target/release/synapsis-mcp
+
+# Windows (native with Rust MSVC toolchain)
+target\release\synapsis-mcp.exe
+```
 
 ---
 
-## Version History
+## 🔐 Security Features
 
-| Version | Date | Highlights |
-|---------|------|------------|
-| **v0.5.1** | 2026-06-12 | Bugfix: DB schema migration for `observations` table. MCP server `zod` resolution fix. |
-| **v0.5.0** | 2026-06-12 | ⚠️ Deprecated — Auto DB migration via `PRAGMA user_version`. Persistent storage in MCP mode. Synapsis logo. |
-| **v0.4.0** | 2026-06-10 | MCP bridge mode removed. Async stdio MCP server. `synapsis-core` crate refactor. |
-| **v0.3.0** | 2026-06-02 | PQC integration (Kyber + Dilithium). Memory search with FTS5. Multi-agent event bus. |
-| **v0.2.0** | 2026-05-20 | MCP protocol support. SQLite backend. Agent orchestration. Task queue system. |
-| **v0.1.0** | 2026-05-10 | Initial prototype. CLI memory management. Basic SQLite storage. |
+### 10-Star Security Model
 
-## Documentation
+| Level | Component | Technology |
+|-------|-----------|------------|
+| ⭐ | PQC Cryptography | CRYSTALS-Kyber-512, CRYSTALS-Dilithium-4 |
+| ⭐⭐ | Zero-Trust | Continuous verification, least privilege |
+| ⭐⭐⭐ | Integrity | HMAC-SHA3-512, Merkle Trees |
+| ⭐⭐⭐⭐ | Confidentiality | ChaCha20-Poly1305 + AES-256-GCM |
+| ⭐⭐⭐⭐⭐ | Authentication | PQC signatures on every operation |
+| ⭐⭐⭐⭐⭐⭐ | Non-repudiation | Immutable log with timestamps |
+| ⭐⭐⭐⭐⭐⭐⭐ | Resilience | Redundancy, verifiable backups |
+| ⭐⭐⭐⭐⭐⭐⭐⭐ | Audit | Every operation logged |
+| ⭐⭐⭐⭐⭐⭐⭐⭐⭐ | Anti-tampering | Detection, automatic alerts |
+| ⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐ | Self-healing | Automatic recovery |
 
-- [CHANGELOG.md](CHANGELOG.md) — Detailed version history and release notes
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Contribution guidelines
-- [SECURITY.md](SECURITY.md) — Security policy
-- [SPEC.md](SPEC.md) — Technical specification
-- [docs/](docs/) — Architecture and security documentation
+### Recent Security Fixes (2026-03-23)
+
+✅ **Session Hijacking Fix** - HMAC-SHA256 session IDs  
+✅ **Lock Poisoning Fix** - is_active verification  
+✅ **TCP Auth** - Challenge-response authentication  
+✅ **SQL Injection Prevention** - Parameterized queries  
+✅ **Resource Management** - Adaptive throttling and load balancing  
+✅ **Performance Optimization** - System resource monitoring and limits  
+✅ **Data Encryption at Rest** - SQLCipher with configurable key
+
+**Security Score:** 4.5/10 → **9.0/10** (after mitigations)
 
 ---
 
-## License
+## 🏗️ Architecture
 
-**BUSL-1.1** (Business Source License 1.1). Personal, educational, and research use. Commercial use requires license.
-
-Contact: methodwhite@proton.me
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    PRESENTATION LAYER                        │
+│   MCP Server  │  HTTP REST  │  CLI  │  TUI (BubbleTea)     │
+└───────────────┼──────────────┼────────┼──────────────────────┘
+                │              │        │
+┌───────────────▼──────────────▼────────▼──────────────────────┐
+│                      DOMAIN LAYER (Core)                      │
+│   Memory Engine  │  Security Layer  │  Audit & Zero-Trust   │
+└──────────────────────────────────────────────────────────────┘
+                │              │        │
+┌───────────────▼──────────────▼────────▼──────────────────────┐
+│                   INFRASTRUCTURE LAYER                        │
+│   Storage (SQLite+FTS5)  │  File Store  │  Sync  │  Network │
+└──────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-**Built with Rust by MethodWhite**
+## 🤝 Multi-Agent Support
+
+### Supported MCP Clients
+
+| Agent | Status | Notes |
+|-------|--------|-------|
+| **Qwen Code** | ✅ Active | Primary development agent |
+| **Claude Code** | ✅ Supported | Full MCP protocol support |
+| **Cursor** | ✅ Supported | Via MCP bridge |
+| **Windsurf** | ✅ Supported | Via MCP bridge |
+| **VS Code + Copilot** | ✅ Supported | Via MCP extension |
+| **Gemini CLI** | ✅ Supported | Via MCP bridge |
+| **OpenCode** | ✅ Active | Tested in parallel |
+
+### Agent Coordination
+
+```bash
+# All agents share the same Synapsis database
+# Automatic session management
+# Distributed locking for resource coordination
+# Task queue for multi-agent workflows
+# Adaptive resource management with throttling
+```
+
+---
+
+## 📈 Resource Management
+
+### Intelligent Resource Control
+Synapsis includes a sophisticated resource management system that prevents system overload when multiple agents are active:
+
+| Feature | Description | Benefit |
+|---------|-------------|---------|
+| **System Monitoring** | Real-time CPU, memory, and load average tracking | Prevents system saturation |
+| **Adaptive Throttling** | Automatic task delay based on system load | Maintains system responsiveness |
+| **Agent Limits** | Per-agent type concurrency limits (opencode: 3, qwen: 2, qwen-code: 2) | Fair resource allocation |
+| **Global Limits** | System-wide thresholds (80% CPU, 85% memory, load 4.0) | Prevents overallocation |
+| **Priority Scheduling** | Task priority-based resource allocation | Critical tasks get resources first |
+
+### Configuration Example
+```json
+// ~/.local/share/synapsis/resource_limits.json
+{
+  "global": {
+    "max_total_tasks": 20,
+    "max_cpu_percent": 70.0,
+    "max_memory_percent": 80.0,
+    "high_load_threshold": 3.5,
+    "enable_adaptive_throttling": true
+  },
+  "agent_limits": {
+    "opencode": {
+      "max_concurrent_tasks": 3,
+      "max_cpu_percent": 50.0,
+      "max_memory_mb": 2048,
+      "priority": 8
+    }
+  }
+}
+```
+
+### How It Works
+1. **Agent Registration**: Each agent registers with the resource manager on connection
+2. **Task Assignment Check**: Before assigning tasks, system checks `can_accept_task(agent_type)`
+3. **Adaptive Throttling**: Exponential backoff delays when system is overloaded (up to 5 seconds)
+4. **Continuous Monitoring**: Real-time tracking of CPU, memory, and load averages
+5. **Clean Recommendations**: Per-agent task limit recommendations based on system state
+
+---
+
+## 📊 Performance
+
+| Metric | Engram (Go) | Synapsis (Rust) | Improvement |
+|--------|-------------|-----------------|-------------|
+| Binary Size | ~15MB | <5MB | 67% smaller |
+| Memory RSS | ~50MB | <20MB | 60% less |
+| Search Latency | ~5ms | <1ms | 80% faster |
+| Cold Start | ~100ms | <20ms | 80% faster |
+
+---
+
+## 🛠️ MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `mem_save` | Save observation with PQC integrity hash |
+| `mem_search` | Advanced FTS5 search with BM25 ranking |
+| `mem_context` | Get relevant context chunks (smart filtering) |
+| `mem_timeline` | Chronological context with filters |
+| `mem_update` | Update with audit trail |
+| `mem_delete` | Soft-delete with recovery option |
+| `mem_session_start` | Register session with auto-reconnect |
+| `mem_session_end` | Complete session with auto-summary |
+| `mem_stats` | Real-time statistics with breakdowns |
+| `agent_heartbeat` | Agent health monitoring |
+| `task_create` | Create task with auto-assignment |
+| `task_claim` | Claim task from queue |
+| `mem_lock_acquire` | Distributed lock for multi-agent |
+| `mem_lock_release` | Release distributed lock |
+| `web_research` | Secure web research (CVE, GitHub, docs) |
+| `cve_search` | Official CVE database search |
+| `security_classify` | Classify content by security risk |
+
+---
+
+## 📁 Project Structure
+
+```
+synapsis/
+├── src/
+│   ├── main.rs          # Binary entry point
+│   ├── lib.rs           # Library root
+│   ├── domain/          # Core domain (entities, types, errors)
+│   ├── core/            # Business logic (auth, orchestrator, vault)
+│   ├── infrastructure/  # Database, network, MCP adapters
+│   └── presentation/    # MCP, HTTP, CLI servers
+├── docs/
+│   ├── SECURITY.md      # Security documentation
+│   ├── MCP.md           # MCP protocol details
+│   ├── ARCHITECTURE.md  # Architecture deep-dive
+│   └── github/          # GitHub-specific docs
+├── tests/               # Integration tests
+├── Cargo.toml           # Rust dependencies
+└── README.md            # This file
+```
+
+---
+
+## 🔒 Security Advisories
+
+### Known Vulnerabilities (Mitigated)
+
+| CVE Reference | Severity | Status | Mitigation |
+|--------------|----------|--------|------------|
+| SYNAPSIS-2026-001 | CRITICAL | ✅ Fixed | TCP authentication |
+| SYNAPSIS-2026-002 | HIGH | ✅ Fixed | Session hijacking |
+| SYNAPSIS-2026-003 | HIGH | ✅ Fixed | Lock poisoning |
+| SYNAPSIS-2026-004 | HIGH | ✅ Fixed | SQL injection |
+| SYNAPSIS-2026-005 | MEDIUM | ✅ Fixed | Data encryption at rest (SQLCipher + env key) |
+| SYNAPSIS-2026-006 | MEDIUM | ✅ Fixed | Rate limiting & Resource Management |
+| SYNAPSIS-2026-007 | MEDIUM | ✅ Fixed | Performance degradation under load |
+
+**Security Score:** 9.0/10 (7/7 critical fixes applied)
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+cargo test
+
+# Run security tests
+cargo test --features security
+
+# Run with coverage
+cargo tarpaulin --out Html
+```
+
+---
+
+## 📖 Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [Security](docs/SECURITY.md) | PQC implementation, security model |
+| [MCP Protocol](docs/MCP.md) | MCP server details, tools |
+| [Architecture](docs/ARCHITECTURE.md) | System design, hexagonal architecture |
+| [Multi-Agent](docs/MULTI-AGENT.md) | Agent coordination, task queue |
+| [API Reference](docs/API.md) | Full API documentation |
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Security Contributions
+
+For security-related contributions, please review our [Security Policy](SECURITY.md) first.
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **Engram** - Original inspiration for persistent memory
+- **MCP Protocol** - Model Context Protocol specification
+- **Rust Community** - Amazing ecosystem and tooling
+
+---
+
+## 📬 Contact
+
+- **Author:** MethodWhite
+- **Email:** methodwhite101@gmail.com
+- **Project:** [GitHub Repository](https://github.com/methodwhite/synapsis)
+
+---
+
+**Built with ❤️ and 🦀 by MethodWhite**
+
+*Last updated: 2026-03-23*

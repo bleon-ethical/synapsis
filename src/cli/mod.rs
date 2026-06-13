@@ -2,13 +2,12 @@
 //!
 //! CLI completa con subcomandos para todas las operaciones.
 
-use std::fmt;
-use std::io::IsTerminal;
-use std::{
+use alloc::{
     format,
     string::{String, ToString},
     vec::Vec,
 };
+use core::fmt;
 
 /// CLI Configuration
 #[derive(Debug, Clone)]
@@ -52,7 +51,6 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "error" | "err" => Self::Error,
@@ -78,7 +76,6 @@ pub enum Command {
     Import(ImportOpts),
     Sync(SyncOpts),
     Config(ConfigOpts),
-    Update,
     Help(HelpOpts),
 }
 
@@ -238,18 +235,6 @@ impl ArgParser {
         Ok((config, command))
     }
 
-    pub fn parse_all(&mut self) -> Result<(CliConfig, Command), CliError> {
-        // Skip program name
-        if !self.args.is_empty() {
-            self.pos = 1;
-        }
-
-        let config = self.parse_global_opts()?;
-        let command = self.parse_command()?;
-
-        Ok((config, command))
-    }
-
     fn parse_global_opts(&mut self) -> Result<CliConfig, CliError> {
         let mut config = CliConfig::default();
 
@@ -287,11 +272,7 @@ impl ArgParser {
                     self.advance();
                 }
                 "--help" | "-h" => {
-                    return Ok(config);
-                }
-                "--version" | "-V" => {
-                    println!("synapsis v{}", env!("CARGO_PKG_VERSION"));
-                    std::process::exit(0);
+                    return Ok((config, Command::Help(HelpOpts { command: None })));
                 }
                 _ => break,
             }
@@ -314,7 +295,6 @@ impl ArgParser {
             "import" => Ok(Command::Import(self.parse_import_opts()?)),
             "sync" => Ok(Command::Sync(self.parse_sync_opts()?)),
             "config" => Ok(Command::Config(self.parse_config_opts()?)),
-            "update" => Ok(Command::Update),
             "help" => Ok(Command::Help(HelpOpts { command: None })),
             _ => Err(CliError::UnknownCommand(cmd)),
         }
@@ -510,24 +490,15 @@ impl ArgParser {
                 session_id: self.expect_value("session_id")?,
                 summary: self.next().filter(|a| !a.starts_with('-')),
             }),
-            "list" | "ls" => {
-                let should_advance = if let Some(arg) = self.peek() {
-                    !arg.starts_with('-')
-                } else {
-                    false
-                };
-
-                let project = if should_advance {
-                    Some(self.expect_value("project")?)
-                } else {
-                    None
-                };
-
-                Ok(SessionOpts::List {
-                    project,
-                    limit: self.next().and_then(|s| s.parse().ok()),
-                })
-            }
+            "list" | "ls" => Ok(SessionOpts::List {
+                project: self.peek().filter(|a| !a.starts_with('-')).map(|s| {
+                    self.advance();
+                    s.clone();
+                    s.clone();
+                    s.clone()
+                }),
+                limit: self.next().and_then(|s| s.parse().ok()),
+            }),
             "active" => Ok(SessionOpts::Active),
             _ => Err(CliError::InvalidValue(format!(
                 "Unknown session action: {}",
@@ -683,7 +654,7 @@ impl ArgParser {
 
 fn read_stdin_or_prompt() -> Result<String, CliError> {
     // Try to read from stdin
-    if !std::io::stdin().is_terminal() {
+    if !std::io::stdin().is_tty() {
         let mut input = String::new();
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)
             .map_err(|_| CliError::IoError)?;
@@ -731,7 +702,7 @@ impl Output {
     pub fn new(config: &CliConfig) -> Self {
         Self {
             json: config.json,
-            color: config.color && std::io::stdout().is_terminal(),
+            color: config.color && std::io::stdout().is_tty(),
             quiet: config.quiet,
         }
     }
@@ -803,7 +774,6 @@ COMMANDS:
     import         Import data
     sync           Synchronize with remote
     config         Manage configuration
-    update         Check for and install updates automatically
     help           Show this help
 
 GLOBAL OPTIONS:

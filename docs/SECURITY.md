@@ -178,37 +178,12 @@ conn.execute(
 
 ---
 
-### SYNAPSIS-2026-007: PQC Cryptographic Stubs
-
-**Severity:** HIGH (CVSS 7.2)  
-**Status:** ✅ FIXED
-
-#### Description
-Post-Quantum Cryptography module contained stub implementations returning dummy data, providing false sense of security:
-- Kyber512 key exchange returning static bytes
-- Dilithium4 signatures not implemented
-- No real PQC protection for session keys
-
-#### Mitigation
-Implemented real CRYSTALS-Kyber-512 and CRYSTALS-Dilithium-4 via pqcrypto library:
-```rust
-// src/core/pqc.rs
-let (pk, sk) = kyber512::keypair();
-let (ct, ss) = kyber512::encapsulate(&pk);
-let ss2 = kyber512::decapsulate(ct, &sk);
-```
-
-**Fix Applied:** 2026-03-23  
-**Verified By:** Unit tests and integration with vault system
-
----
-
 ## ⚠️ Medium Vulnerabilities (Pending)
 
 ### SYNAPSIS-2026-005: Data Encryption at Rest
 
 **Severity:** MEDIUM (CVSS 5.3)  
-**Status:** ✅ FIXED
+**Status:** ⚠️ PENDING
 
 #### Description
 SQLite database is stored unencrypted, allowing:
@@ -216,26 +191,27 @@ SQLite database is stored unencrypted, allowing:
 - Sensitive memory content disclosure
 - Credential/secret exposure
 
-#### Mitigation (Implemented)
-SQLCipher encryption is configured and enabled via environment variable `SYNAPSIS_DB_KEY`. Database connections automatically apply encryption key.
+#### Mitigation (Planned)
+Implement SQLCipher encryption:
 ```rust
-// src/infrastructure/database/mod.rs
+// Use rusqlite with sqlcipher feature
 let conn = Connection::open_with_flags(
     db_path,
     flags::SQLITE_OPEN_READ_WRITE | flags::SQLITE_OPEN_CREATE,
 )?;
-conn.execute_batch(&format!("PRAGMA key = '{}'", db_key))?;
+
+// Set encryption key
+conn.execute_batch(&format!("PRAGMA key = '{}'", encryption_key))?;
 ```
 
-**Fix Applied:** 2026-03-23  
-**Note:** Encryption key must be provided via environment variable.
+**ETA:** 2026-03-25
 
 ---
 
 ### SYNAPSIS-2026-006: Rate Limiting
 
 **Severity:** MEDIUM (CVSS 4.3)  
-**Status:** ⚠️ PARTIAL
+**Status:** ⚠️ PENDING
 
 #### Description
 No rate limiting on MCP/TCP endpoints allows:
@@ -243,8 +219,18 @@ No rate limiting on MCP/TCP endpoints allows:
 - Resource exhaustion
 - Denial of service
 
-#### Mitigation (Partially Implemented)
-Rate limiter module is initialized (`src/core/rate_limiter.rs`) but not yet enforced on endpoints. Implementation ready for integration.
+#### Mitigation (Planned)
+Implement token bucket rate limiting:
+```rust
+use governor::{Quota, RateLimiter};
+
+let limiter = RateLimiter::direct(Quota::per_second(100));
+
+// In request handler
+if limiter.check().is_err() {
+    return Err(Error::RateLimitExceeded);
+}
+```
 
 **ETA:** 2026-03-25
 
@@ -256,8 +242,7 @@ Rate limiter module is initialized (`src/core/rate_limiter.rs`) but not yet enfo
 |------|-------|---------|
 | 2026-03-21 | 4.5/10 | Initial audit |
 | 2026-03-22 | 8.5/10 | 4/6 critical fixes applied |
-| 2026-03-23 | 9.0/10 | PQC real implementation, audit logging integrated, SQLCipher encryption configured |
-| Target | 9.5/10 | Pending: rate limiting enforcement, TLS for TCP connections |
+| Target | 9.5/10 | Pending: encryption, rate limiting |
 
 ---
 
@@ -287,10 +272,9 @@ Rate limiter module is initialized (`src/core/rate_limiter.rs`) but not yet enfo
 - [x] Session ID signing (HMAC-SHA256)
 - [x] Lock owner verification
 - [x] SQL injection prevention (parameterized queries)
-- [x] PQC cryptography (Kyber512 + Dilithium4) implemented
-- [x] Data encryption at rest (SQLCipher configured, requires SYNAPSIS_DB_KEY env var)
+- [ ] Data encryption at rest
 - [ ] Rate limiting
-- [x] Audit logging (integrated with MCP tools memory_update/memory_delete)
+- [ ] Audit logging
 - [ ] Security headers (HTTP)
 - [ ] TLS for TCP connections
 - [ ] Regular penetration testing
@@ -309,7 +293,7 @@ Rate limiter module is initialized (`src/core/rate_limiter.rs`) but not yet enfo
 
 ## 📞 Reporting Security Issues
 
-**Email:** methodwhite@proton.me (primary) · methodwhite.developer@gmail.com (enterprise)  
+**Email:** methodwhite101@gmail.com  
 **PGP Key:** Available on request  
 **Response Time:** Within 48 hours
 
@@ -322,5 +306,5 @@ Rate limiter module is initialized (`src/core/rate_limiter.rs`) but not yet enfo
 
 ---
 
-**Last Updated:** 2026-03-23  
+**Last Updated:** 2026-03-22  
 **Next Audit:** 2026-04-22

@@ -1,22 +1,96 @@
-//! HTTP Server
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
+use crate::presentation::mcp::McpServer;
 
-pub struct HTTPServer {
-    port: u16,
+pub struct HttpTransport {
+    server: Arc<McpServer>,
 }
 
-impl HTTPServer {
-    pub fn new(port: u16) -> Self {
-        Self { port }
+impl HttpTransport {
+    pub fn new(server: Arc<McpServer>) -> Self {
+        Self { server }
     }
-    pub fn start(&self) {
-        println!("HTTP Server starting on port {}", self.port);
+
+    pub fn start(&self, port: u16) {
+        let addr = format!("127.0.0.1:{}", port);
+        let listener = TcpListener::bind(&addr).expect("Failed to bind HTTP server");
+        eprintln!("[Synapsis MCP] HTTP/SSE server listening on {}", addr);
+
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let server = self.server.clone();
+                    std::thread::spawn(move || {
+                        handle_connection(stream, &server);
+                    });
+                }
+                Err(e) => eprintln!("[HTTP] Connection error: {}", e),
+            }
+        }
     }
 }
 
-impl std::fmt::Debug for HTTPServer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HTTPServer")
-            .field("port", &self.port)
-            .finish()
+fn handle_connection(mut stream: TcpStream, server: &McpServer) {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return;
+    }
+
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
+    if parts.len() < 2 {
+        return;
+    }
+    let method = parts[0];
+    let path = parts[1];
+
+    let mut content_length: usize = 0;
+
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+            break;
+        }
+        let line = line.trim();
+        if let Some(pos) = line.find(':') {
+            let key = line[..pos].trim().to_lowercase();
+            let value = line[pos + 1..].trim().to_string();
+            if key == "content-length" {
+                content_length = value.parse().unwrap_or(0);
+            }
+        }
+    }
+
+    match (method, path) {
+        ("GET", "/sse") => {
+            let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+            let _ = stream.write_all(resp.as_bytes());
+            let _ = stream.flush();
+            loop {
+                let _ = stream.write_all(b"data: {\"type\":\"keepalive\"}\n\n");
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+        }
+        ("POST", "/") | ("POST", "/message") => {
+            let mut body = vec![0u8; content_length];
+            let _ = reader.read_exact(&mut body);
+            let body_str = String::from_utf8_lossy(&body);
+            let response = server.handle_message(&body_str).unwrap_or_default();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n{}",
+                response.len(),
+                response
+            );
+            let _ = stream.write_all(resp.as_bytes());
+            let _ = stream.flush();
+        }
+        _ => {
+            let resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+            let _ = stream.write_all(resp.as_bytes());
+        }
     }
 }

@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "synapsis": {
-      "type": "tcp",
-      "host": "127.0.0.1",
-      "port": 7438,
+      "type": "stdio",
+      "command": "synapsis-mcp",
       "enabled": true,
       "autoRegister": true,
       "projectKey": "${workspaceFolderBasename}",

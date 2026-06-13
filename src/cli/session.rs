@@ -1,33 +1,33 @@
 //! CLI Session Management
-//!
+//! 
 //! Each CLI instance gets a unique identity.
 //! Multiple instances of the same CLI can run simultaneously.
 
-use synapsis_core::core::session_id::{SessionId, SessionRegistry};
+use crate::core::session_id::{SessionId, SessionRegistry};
 use std::sync::{Arc, RwLock};
 
-// Global session registry
+/// Global session registry
 lazy_static::lazy_static! {
-    static ref SESSION_REGISTRY: Arc<RwLock<SessionRegistry>> =
+    static ref SESSION_REGISTRY: Arc<RwLock<SessionRegistry>> = 
         Arc::new(RwLock::new(SessionRegistry::new()));
 }
 
 /// Initialize CLI session
 pub fn init_cli_session(cli_type: &str) -> SessionId {
     let session = SessionId::new(cli_type);
-
+    
     // Register in global registry
     {
-        let mut registry = SESSION_REGISTRY.write().unwrap_or_else(|e| e.into_inner());
+        let mut registry = SESSION_REGISTRY.write().unwrap();
         registry.register(session.clone());
     }
-
-    eprintln!("[CLI] Session initialized: {:?}", session);
+    
+    eprintln!("[CLI] Session initialized: {}", session.to_string());
     eprintln!("[CLI] Type: {}", session.cli_type);
     eprintln!("[CLI] UUID: {}", session.instance_uuid);
     eprintln!("[CLI] Host: {}", session.hostname);
     eprintln!("[CLI] PID: {}", session.pid);
-
+    
     session
 }
 
@@ -43,13 +43,13 @@ pub fn list_active_sessions(max_age_secs: i64) -> Vec<String> {
     registry
         .get_active(max_age_secs)
         .iter()
-        .map(|s| format!("{:?}", s))
+        .map(|s| s.to_string())
         .collect()
 }
 
 /// Cleanup stale sessions
 pub fn cleanup_stale_sessions(max_age_secs: i64) -> usize {
-    let mut registry = SESSION_REGISTRY.write().unwrap_or_else(|e| e.into_inner());
+    let mut registry = SESSION_REGISTRY.write().unwrap();
     registry.cleanup_stale(max_age_secs)
 }
 

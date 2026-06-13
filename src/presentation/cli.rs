@@ -1,10 +1,10 @@
 //! Synapsis CLI - Robust Command Line Interface
 
+use crate::domain::entities::{Observation, SearchParams};
+use crate::domain::ports::StoragePort;
+use crate::domain::types::{ObservationId, ObservationType, SessionId};
+use crate::infrastructure::database::Database;
 use std::env;
-use synapsis_core::domain::entities::{Observation, SearchParams};
-use synapsis_core::domain::ports::StoragePort;
-use synapsis_core::domain::types::{ObservationId, ObservationType, SessionId};
-use synapsis_core::infrastructure::database::Database;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -163,8 +163,7 @@ impl CLI {
             return Err(1);
         }
 
-        let mut obs =
-            Observation::new(SessionId::new(&session_id), obs_type.clone(), title.clone(), content);
+        let mut obs = Observation::new(SessionId::new(session_id), obs_type, title.clone(), content);
         obs.project = project;
 
         match self.db.save_observation(&obs) {
@@ -238,8 +237,7 @@ impl CLI {
             obs_type,
             project,
             scope: None,
-            limit: Some(limit as i64),
-            ..Default::default()
+            limit,
         };
 
         let results = self.db.search_observations(&params).map_err(|e| {
@@ -316,8 +314,8 @@ impl CLI {
     }
 
     fn cmd_sessions(&self, _args: &[&str]) -> Result<(), i32> {
-        use synapsis_core::domain::ports::SessionPort;
-
+        use crate::domain::ports::SessionPort;
+        
         let sessions = self.db.list_sessions().map_err(|e| {
             eprintln!("Error: {}", e);
             1
@@ -355,29 +353,13 @@ impl CLI {
 
         println!("Synapsis Statistics");
         println!("{}", "═".repeat(40));
-        println!(
-            "Total observations: {}",
-            stats["total_observations"].as_i64().unwrap_or(0)
-        );
-        println!(
-            "Total sessions:     {}",
-            stats["total_sessions"].as_i64().unwrap_or(0)
-        );
-        println!(
-            "Active sessions:     {}",
-            stats["active_sessions"].as_i64().unwrap_or(0)
-        );
-        println!(
-            "Deleted items:      {}",
-            stats["deleted_observations"].as_i64().unwrap_or(0)
-        );
+        println!("Total observations: {}", stats["total_observations"].as_i64().unwrap_or(0));
+        println!("Total sessions:     {}", stats["total_sessions"].as_i64().unwrap_or(0));
+        println!("Active sessions:     {}", stats["active_sessions"].as_i64().unwrap_or(0));
+        println!("Deleted items:      {}", stats["deleted_observations"].as_i64().unwrap_or(0));
 
         if let Some(projects) = stats["projects"].as_array() {
-            let project_list: Vec<String> = projects
-                .iter()
-                .filter_map(|p| p.as_str())
-                .map(|s| s.to_string())
-                .collect();
+            let project_list: Vec<String> = projects.iter().filter_map(|p| p.as_str()).map(|s| s.to_string()).collect();
             if !project_list.is_empty() {
                 println!("Projects:           {}", project_list.join(", "));
             }

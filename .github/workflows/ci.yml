@@ -2,39 +2,41 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+    - name: Run fmt check
+      run: cargo fmt -- --check
+
+  security-audit:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Clone synapsis-core
-      run: git clone --depth 1 https://github.com/MethodWhite/synapsis-core.git synapsis-core
-    - name: Fix path dependencies
-      run: |
-        sed -i 's|path = "../synapsis-core"|path = "synapsis-core"|' Cargo.toml
-    - name: Install Rust toolchain
-      run: rustup update stable && rustup default stable
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends libsqlcipher-dev libssl-dev pkg-config
-    - name: Build
-      run: cargo build --release
-    - name: Build synapsis-mcp
-      run: cargo build --release --bin synapsis-mcp
-    - name: Test
-      run: cargo test --release
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+    - name: Run security audit
+      run: cargo audit
