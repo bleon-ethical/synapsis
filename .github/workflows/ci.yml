@@ -14,6 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Clone synapsis-core
+      run: git clone --depth 1 https://github.com/MethodWhite/synapsis-core.git synapsis-core
+    - name: Fix path dependencies
+      run: |
+        sed -i 's|path = "../synapsis-core"|path = "synapsis-core"|' Cargo.toml
     - name: Install Rust toolchain
       run: rustup update stable && rustup default stable
     - uses: actions/cache@v4
@@ -30,6 +35,6 @@ jobs:
     - name: Build
       run: cargo build --release
     - name: Build synapsis-mcp
-      run: cargo build --release -p synapsis-mcp
+      run: cargo build --release --bin synapsis-mcp
     - name: Test
       run: cargo test --release
