@@ -1,6 +1,7 @@
 # Rust
 target/
 **/*.rs.bk
+# Note: Cargo.lock is committed for application reproducibility
 
 # IDE
 .vscode/
@@ -25,3 +26,5 @@ dist/
 # Logs
 *.log
 synapsis_*.log
+
+# Keep Cargo.lock committed for reproducible builds
