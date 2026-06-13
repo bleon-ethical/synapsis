@@ -1,0 +1,4 @@
+[advisories]
+# rand unsound warning: only affects custom loggers calling rand::rng()
+# we don't use custom loggers, safe to ignore
+ignore = ["RUSTSEC-2026-0097"]

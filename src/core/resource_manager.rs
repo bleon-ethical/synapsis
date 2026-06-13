@@ -223,8 +223,7 @@ impl ResourceManager {
         if max_factor > 1.0 {
             // Exponential backoff when overloaded
             let excess = max_factor - 1.0;
-            let delay = (100.0 * excess.powi(2)).min(5000.0) as u64; // Max 5 seconds
-            delay
+            (100.0 * excess.powi(2)).min(5000.0) as u64
         } else if max_factor > 0.8 {
             // Gradual slowdown when approaching limits
             100

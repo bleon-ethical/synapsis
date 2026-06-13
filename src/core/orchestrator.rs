@@ -294,8 +294,7 @@ impl Orchestrator {
 
     /// Communicate with any agent in the hierarchy (cross-orchestrator)
     pub fn send_cross_message(&self, from: &str, to: &str, content: serde_json::Value) -> String {
-        let msg_id = self.send_message(from, Some(to), MessageType::CrossOrchestrator, content);
-        msg_id
+        self.send_message(from, Some(to), MessageType::CrossOrchestrator, content)
     }
 
     /// Get all agents in the hierarchy that can handle a task

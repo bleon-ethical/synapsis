@@ -51,9 +51,6 @@ getrandom = "0.2"
 lazy_static = "1.4"
 hex = "0.4"
 
-# PQC
-pqcrypto-traits = "0.3"
-
 # CLI
 clap = { version = "4", features = ["derive"] }
 regex = "1"
