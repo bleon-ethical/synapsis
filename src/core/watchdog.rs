@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -264,7 +265,7 @@ impl FilesystemWatchdog {
             hash,
             size: metadata.len(),
             modified,
-            permissions: metadata.mode(),
+            permissions: get_file_mode(&metadata),
             captured_at: timestamp,
         })
     }
@@ -589,6 +590,16 @@ pub mod mcp_tools {
             })),
         })
     }
+}
+
+#[cfg(unix)]
+fn get_file_mode(metadata: &fs::Metadata) -> u32 {
+    metadata.mode()
+}
+
+#[cfg(not(unix))]
+fn get_file_mode(_metadata: &fs::Metadata) -> u32 {
+    0o644
 }
 
 #[cfg(test)]
