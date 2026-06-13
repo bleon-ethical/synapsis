@@ -95,7 +95,8 @@ CLI (opencode, qwen)   IDE (vscode, cursor)   TUI (mw-cli)
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.5.0** | 2026-06-12 | Auto DB migration via `PRAGMA user_version`. Persistent storage in MCP mode. Synapsis logo. |
+| **v0.5.1** | 2026-06-12 | Bugfix: DB schema migration for `observations` table. MCP server `zod` resolution fix. |
+| **v0.5.0** | 2026-06-12 | ⚠️ Deprecated — Auto DB migration via `PRAGMA user_version`. Persistent storage in MCP mode. Synapsis logo. |
 | **v0.4.0** | 2026-06-10 | MCP bridge mode removed. Async stdio MCP server. `synapsis-core` crate refactor. |
 | **v0.3.0** | 2026-06-02 | PQC integration (Kyber + Dilithium). Memory search with FTS5. Multi-agent event bus. |
 | **v0.2.0** | 2026-05-20 | MCP protocol support. SQLite backend. Agent orchestration. Task queue system. |

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-12
+
+### Fixed
+
+- **DB schema migration bug** — `synapsis_mem_save` crashed with `table observations has no column named summary` when database was created by an older schema. Added migration v2 with `ALTER TABLE ADD COLUMN` for `summary`, `tags`, `obs_type`, `importance`, `token_count`, `access_count`.
+- **MCP server startup** — `@modelcontextprotocol/server-filesystem`, `server-memory`, and `server-sequential-thinking` failed with `ERR_MODULE_NOT_FOUND: zod`. Fixed by symlinking `zod@4.4.3` in the pnpm store.
+
+### Changed
+
+- **Version bump** — v0.5.0 → v0.5.1 (both `synapsis` and `synapsis-core` crates)
+- **`database.rs`** — `run_migrations()` now includes migration v2 that adds missing columns via `ALTER TABLE` for backwards compatibility with DBs created by the old schema.
+
 ## [0.5.0] - 2026-06-12
 
 ### Added
@@ -95,7 +107,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Security Score:** 8.5/10  
 **Last Updated:** 2026-06-12
 
-[Unreleased]: https://github.com/methodwhite/synapsis/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/methodwhite/synapsis/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/methodwhite/synapsis/releases/tag/v0.5.1
+[0.5.0]: https://github.com/methodwhite/synapsis/releases/tag/v0.5.0
 [0.4.0]: https://github.com/methodwhite/synapsis/releases/tag/v0.4.0
 [0.3.0]: https://github.com/methodwhite/synapsis/releases/tag/v0.3.0
 [0.2.0]: https://github.com/methodwhite/synapsis/releases/tag/v0.2.0

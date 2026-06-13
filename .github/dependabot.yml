@@ -8,3 +8,9 @@ updates:
     labels:
       - "dependencies"
       - "rust"
+    ignore:
+      - dependency-name: "synapsis-core"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
