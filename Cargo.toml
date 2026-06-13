@@ -7,7 +7,7 @@ description = "Persistent memory engine for AI agents with PQC security"
 license = "MIT"
 
 [features]
-default = ["db-encryption"]
+default = []
 security = []
 db-encryption = ["rusqlite/sqlcipher"]
 tui = ["dep:crossterm", "dep:ratatui"]
