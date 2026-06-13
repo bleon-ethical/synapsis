@@ -55,8 +55,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: SYNAPSIS_DATA_DIR=/tmp/synapsis-test-${{ github.run_id }} cargo test -- --test-threads=1
-      - run: SYNAPSIS_DATA_DIR=/tmp/synapsis-test-${{ github.run_id }} cargo test --all-features -- --test-threads=1
+      - run: SYNAPSIS_DATA_DIR=/tmp/synapsis-test-${{ github.run_id }} cargo test -j 1 -- --test-threads=1 2>&1
+      - run: SYNAPSIS_DATA_DIR=/tmp/synapsis-test-${{ github.run_id }} cargo test -j 1 --all-features -- --test-threads=1 2>&1
 
   msrv:
     name: MSRV (1.88.0)
