@@ -55,7 +55,6 @@ jobs:
             echo "title_valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "title_valid=false" >> "$GITHUB_OUTPUT"
-            echo "PR title does not follow Conventional Commits format: $TITLE"
           fi
 
   auto-approve:
