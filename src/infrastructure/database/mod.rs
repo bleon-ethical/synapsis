@@ -79,8 +79,7 @@ impl Database {
                         Ok(c) => c,
                         Err(e2) => {
                             db_warn!("[Database] Falling back to in-memory DB: {}", e2);
-                            Connection::open_in_memory()
-                                .expect("in-memory DB")
+                            Connection::open_in_memory().expect("in-memory DB")
                         }
                     }
                 }
@@ -90,8 +89,7 @@ impl Database {
                 Ok(c) => c,
                 Err(e) => {
                     db_warn!("[Database] Falling back to in-memory DB: {}", e);
-                    Connection::open_in_memory()
-                        .expect("in-memory DB")
+                    Connection::open_in_memory().expect("in-memory DB")
                 }
             }
         };
