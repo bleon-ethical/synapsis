@@ -1,12 +1,27 @@
-/target
+# Rust
+target/
 **/*.rs.bk
-Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+*.o
+*.exe
+
+# Config override
 .env
+*.local
+
+# Logs
 *.log
-*.log.*
-logs/
-*.db
-*.db-*
-*.db.*
-synapsis.db*
-!*.json
+synapsis_*.log
