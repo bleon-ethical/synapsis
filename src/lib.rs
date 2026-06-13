@@ -26,6 +26,7 @@ pub mod plugins;
 
 // Session cleanup module - automatic session lifecycle management
 pub mod session_cleanup;
+pub use synapsis_core::core::session_cleanup::{SessionCleanupConfig, SessionCleanupJob, CleanupStats};
 
 pub use synapsis_core::infrastructure::database::Database;
 pub use synapsis_core::domain::ports::StoragePort;

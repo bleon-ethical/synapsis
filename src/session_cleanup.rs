@@ -9,16 +9,18 @@
 //! # Quick Start
 //!
 //! ```rust
-//! // In your application initialization
+//! use std::sync::Arc;
+//! use synapsis::Database;
 //! use synapsis::session_cleanup::init_session_cleanup;
 //!
 //! let db = Arc::new(Database::new());
 //! init_session_cleanup(&db);
 //! ```
 
-use synapsis_core::core::session_cleanup::{SessionCleanupConfig, SessionCleanupJob};
 use synapsis_core::infrastructure::database::Database;
 use std::sync::Arc;
+
+pub use synapsis_core::core::session_cleanup::{CleanupStats, SessionCleanupConfig, SessionCleanupJob};
 
 /// Default session timeout (5 minutes)
 pub const DEFAULT_SESSION_TIMEOUT_SECS: u64 = 300;
@@ -45,6 +47,10 @@ pub const DEFAULT_CLEANUP_INTERVAL_SECS: u64 = 60;
 /// # Example
 ///
 /// ```rust
+/// use std::sync::Arc;
+/// use synapsis::Database;
+/// use synapsis::session_cleanup::init_session_cleanup;
+///
 /// let db = Arc::new(Database::new());
 /// let cleanup_job = init_session_cleanup(&db);
 ///
@@ -72,13 +78,12 @@ pub fn init_session_cleanup(db: &Arc<Database>) -> Arc<SessionCleanupJob> {
 /// # Example
 ///
 /// ```rust
-/// let config = SessionCleanupConfig {
-///     session_timeout_secs: 600,      // 10 minutes
-///     cleanup_interval_secs: 120,     // 2 minutes
-///     require_heartbeat: true,
-///     auto_end_sessions: true,
-/// };
+/// use std::sync::Arc;
+/// use synapsis::Database;
+/// use synapsis::session_cleanup::{init_session_cleanup_with_config, SessionCleanupConfig};
 ///
+/// let db = Arc::new(Database::new());
+/// let config = SessionCleanupConfig::default();
 /// let cleanup_job = init_session_cleanup_with_config(&db, config);
 /// ```
 pub fn init_session_cleanup_with_config(
@@ -114,12 +119,17 @@ pub fn init_session_cleanup_with_config(
 /// # Example
 ///
 /// ```rust
+/// use std::sync::Arc;
+/// use synapsis::Database;
+/// use synapsis::session_cleanup::manual_cleanup;
+///
+/// let db = Arc::new(Database::new());
 /// // Emergency cleanup (timeout=0)
-/// let stats = manual_cleanup(&db, 0)?;
-/// println!("Cleaned {} sessions", stats.cleaned);
+/// let stats = manual_cleanup(&db, 0).unwrap();
+/// println!("Cleaned {} sessions", stats.removed);
 ///
 /// // Normal cleanup (5 min timeout)
-/// let stats = manual_cleanup(&db, 300)?;
+/// let stats = manual_cleanup(&db, 300).unwrap();
 /// ```
 pub fn manual_cleanup(
     db: &Arc<Database>,
