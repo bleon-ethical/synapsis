@@ -1,5 +1,20 @@
 //! Synapsis SQLite Database - Core Implementation
 
+macro_rules! db_info {
+    ($($arg:tt)*) => {{
+        let quiet = std::env::var("SYNAPSIS_QUIET").is_ok() || std::env::var("QUIET").is_ok();
+        if !quiet {
+            eprintln!($($arg)*);
+        }
+    }};
+}
+
+macro_rules! db_warn {
+    ($($arg:tt)*) => {{
+        eprintln!($($arg)*);
+    }};
+}
+
 use crate::core::uuid::Uuid;
 use crate::domain::ports::{SessionPort, StoragePort};
 use crate::domain::*;
@@ -43,16 +58,34 @@ impl Database {
         std::fs::create_dir_all(&data_dir).ok();
         let db_path = data_dir.join("synapsis.db");
         let conn = if let Some(key) = &encryption_key {
-            let conn = Connection::open(&db_path).unwrap();
-            // SQLCipher expects key as bytes; we'll use hex encoding
-            let hex_key = hex::encode(key);
-            conn.execute_batch(&format!("PRAGMA key = 'x{}'", hex_key))
-                .unwrap();
-            // Verify encryption is active
-            conn.execute_batch("PRAGMA cipher_version").unwrap();
-            conn
+            match Connection::open(&db_path) {
+                Ok(conn) => {
+                    let hex_key = hex::encode(key);
+                    if conn.execute_batch(&format!("PRAGMA key = 'x{}'", hex_key)).is_err() {
+                        db_warn!("[Database] Warning: failed to set encryption key");
+                    }
+                    let _ = conn.execute_batch("PRAGMA cipher_version");
+                    conn
+                }
+                Err(e) => {
+                    db_warn!("[Database] Warning: failed to open encrypted DB ({}), trying unencrypted", e);
+                    match Connection::open(&db_path) {
+                        Ok(c) => c,
+                        Err(e2) => {
+                            db_warn!("[Database] Fatal: cannot open database: {}", e2);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
         } else {
-            Connection::open(&db_path).unwrap()
+            match Connection::open(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    db_warn!("[Database] Fatal: cannot open database: {}", e);
+                    std::process::exit(1);
+                }
+            }
         };
 
         Self {
@@ -64,11 +97,69 @@ impl Database {
     }
 
     pub fn get_conn(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap()
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn migrate_from_json(&self) -> Result<()> {
-        eprintln!("[Database] Migration complete");
+        // Look for JSON files in the data directory and import them
+        let json_path = self._data_dir.join("observations.json");
+        if json_path.exists() {
+            db_info!("[Database] Migrating observations from JSON...");
+            let content = match std::fs::read_to_string(&json_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    db_warn!("[Database] Cannot read {}: {}", json_path.display(), e);
+                    return Ok(());
+                }
+            };
+            let observations: Vec<serde_json::Value> = match serde_json::from_str(&content) {
+                Ok(o) => o,
+                Err(e) => {
+                    db_warn!("[Database] Invalid JSON in {}: {}", json_path.display(), e);
+                    return Ok(());
+                }
+            };
+            let conn = self.get_conn();
+            for obs_val in &observations {
+                if let (Some(title), Some(content)) = (
+                    obs_val.get("title").and_then(|t| t.as_str()),
+                    obs_val.get("content").and_then(|c| c.as_str()),
+                ) {
+                    let session_id = obs_val.get("session_id")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("migrated");
+                    let now = Timestamp::now().0;
+                    let sync_id = SyncId::new();
+                    let obs_type: u8 = obs_val.get("observation_type")
+                        .and_then(|t| t.as_u64())
+                        .unwrap_or(0) as u8;
+                    let scope: u8 = obs_val.get("scope")
+                        .and_then(|s| s.as_u64())
+                        .unwrap_or(0) as u8;
+                    use sha2::Digest;
+                    let hash = sha2::Sha256::digest(content.as_bytes());
+                    let _ = conn.execute(
+                        "INSERT OR IGNORE INTO observations (sync_id, session_id, project, observation_type, title, content, scope, content_hash, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![
+                            sync_id.0,
+                            session_id,
+                            obs_val.get("project").and_then(|p| p.as_str()),
+                            obs_type,
+                            title,
+                            content,
+                            scope,
+                            hash.as_slice(),
+                            now,
+                            now,
+                        ],
+                    ).ok();
+                }
+            }
+            db_info!("[Database] Imported {} observations from JSON", observations.len());
+        } else {
+            db_info!("[Database] No migration file found at {}", json_path.display());
+        }
         Ok(())
     }
 
@@ -114,6 +205,28 @@ impl Database {
                 integrity_hash TEXT,
                 classification INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS observations_fts (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts_index USING fts5(
+                title, content, content=observations_fts, content_rowid=id
+            );
+            CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
+                INSERT INTO observations_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
+                INSERT INTO observations_fts_index(rowid, title, content) VALUES (new.id, new.title, new.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
+                INSERT INTO observations_fts(observations_fts, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
+                INSERT INTO observations_fts_index(observations_fts_index, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
+                INSERT INTO observations_fts(observations_fts, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
+                INSERT INTO observations_fts_index(observations_fts_index, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
+                INSERT INTO observations_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
+                INSERT INTO observations_fts_index(rowid, title, content) VALUES (new.id, new.title, new.content);
+            END;
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 project_key TEXT NOT NULL,
@@ -198,6 +311,16 @@ impl Database {
             );
             ",
         )?;
+
+        if version >= 1 && version < 2 {
+            // Rebuild FTS index for existing observations
+            let _ = conn.execute_batch(
+                "INSERT OR IGNORE INTO observations_fts(rowid, title, content) SELECT id, title, content FROM observations;
+                 INSERT OR IGNORE INTO observations_fts_index(rowid, title, content) SELECT id, title, content FROM observations;
+                 INSERT INTO schema_version (version) VALUES (2);"
+            );
+        }
+
         Ok(())
     }
 
@@ -277,11 +400,22 @@ impl Database {
             params![now],
         )?;
 
-        let result = conn.execute(
-            "INSERT OR REPLACE INTO active_locks (lock_key, agent_session_id, acquired_at, expires_at) VALUES (?, ?, ?, ?)",
-            params![lock_key, session_id, now, expires],
-        );
-        Ok(result.is_ok())
+            // Only acquire if lock is free or expired
+            let existing: std::result::Result<String, _> = conn.query_row(
+                "SELECT agent_session_id FROM active_locks WHERE lock_key = ?1 AND expires_at > ?2",
+                params![lock_key, now],
+                |row| row.get(0),
+            );
+            match existing {
+                Ok(owner) if owner != session_id => Ok(false),
+                _ => {
+                    let result = conn.execute(
+                        "INSERT OR REPLACE INTO active_locks (lock_key, agent_session_id, acquired_at, expires_at) VALUES (?, ?, ?, ?)",
+                        params![lock_key, session_id, now, expires],
+                    );
+                    Ok(result.is_ok())
+                }
+            }
     }
 
     pub fn release_lock(&self, lock_key: &str) -> Result<()> {
@@ -341,11 +475,16 @@ impl Database {
         ).optional()?;
 
         if let Some(task_id) = task {
-            conn.execute(
-                "UPDATE task_queue SET status = 'running', agent_session_id = ?, started_at = ? WHERE task_id = ?",
+            // Atomic claim: only succeed if still pending
+            let updated = conn.execute(
+                "UPDATE task_queue SET status = 'running', agent_session_id = ?, started_at = ? WHERE task_id = ? AND status = 'pending'",
                 params![session_id, now, task_id],
             )?;
-            Ok(Some(task_id))
+            if updated > 0 {
+                Ok(Some(task_id))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
@@ -514,7 +653,9 @@ impl Database {
         limit: i32,
     ) -> Result<Vec<serde_json::Value>> {
         let conn = self.get_conn();
-        let search_term = format!("%{}%", query);
+        // Escape LIKE wildcards to prevent semantic injection
+        let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let search_term = format!("%{}%", escaped);
 
         let mut stmt = if let Some(p) = project {
             let mut s = conn.prepare(
@@ -553,6 +694,20 @@ impl Default for Database {
 }
 
 impl Database {
+    pub fn soft_delete_observation(&self, id: i64) -> Result<()> {
+        let conn = self.get_conn();
+        let now = Timestamp::now().0;
+        conn.execute(
+            "UPDATE observations SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            rusqlite::params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_timeline_direct(&self, limit: i32) -> Result<Vec<TimelineEntry>> {
+        self.get_timeline(limit)
+    }
+
     pub fn save_observation_direct(&self, obs: &Observation) -> Result<ObservationId> {
         let conn = self.get_conn();
         let now = Timestamp::now().0;
@@ -580,6 +735,138 @@ impl Database {
         let id = conn.last_insert_rowid();
         Ok(ObservationId::new(id))
     }
+
+    pub fn search_fts5(&self, query: &str, limit: i32) -> Result<Vec<serde_json::Value>> {
+        let conn = self.get_conn();
+        let mut stmt = conn.prepare(
+            "SELECT o.id, o.title, o.content, o.project, o.created_at, o.observation_type, o.scope
+             FROM observations_fts_index fts
+             JOIN observations o ON o.id = fts.rowid
+             WHERE observations_fts_index MATCH ?1
+             AND o.deleted_at IS NULL
+             ORDER BY rank
+             LIMIT ?2"
+        )?;
+        let rows = stmt.query_map(params![query, limit], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "title": row.get::<_, String>(1)?,
+                "content": row.get::<_, String>(2)?,
+                "project": row.get::<_, Option<String>>(3)?,
+                "created_at": row.get::<_, i64>(4)?,
+                "observation_type": row.get::<_, u8>(5)?,
+                "scope": row.get::<_, u8>(6)?,
+            }))
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn backup_to(&self, path: &std::path::Path) -> Result<()> {
+        let conn = self.get_conn();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| SynapsisError::internal_bug(e.to_string()))?;
+        }
+        conn.execute_batch(&format!("VACUUM INTO '{}'", path.display().to_string().replace('\'', "''")))
+            .map_err(|e| SynapsisError::internal_bug(e.to_string()))?;
+        db_info!("[Database] Backup saved to {}", path.display());
+        Ok(())
+    }
+
+    pub fn integrity_check(&self) -> Result<Vec<String>> {
+        let conn = self.get_conn();
+        let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let results: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+        if results.iter().any(|r| r != "ok") {
+            db_warn!("[Database] Integrity check found issues: {:?}", results);
+        }
+        Ok(results)
+    }
+
+    pub fn quick_check(&self) -> Result<bool> {
+        let results = self.integrity_check()?;
+        Ok(results.iter().all(|r| r == "ok"))
+    }
+
+    pub fn prune_observations(&self, older_than_days: i64) -> Result<u64> {
+        let conn = self.get_conn();
+        let cutoff = Timestamp::now().0 - (older_than_days * 86400);
+        let count = conn.execute(
+            "UPDATE observations SET deleted_at = ?1 WHERE deleted_at IS NULL AND created_at < ?2",
+            params![Timestamp::now().0, cutoff],
+        )?;
+        if count > 0 {
+            db_info!("[Database] Pruned {} observations older than {} days", count, older_than_days);
+        }
+        Ok(count as u64)
+    }
+
+    pub fn vacuum(&self) -> Result<()> {
+        let conn = self.get_conn();
+        conn.execute_batch("VACUUM")
+            .map_err(|e| SynapsisError::internal_bug(e.to_string()))?;
+        db_info!("[Database] VACUUM completed");
+        Ok(())
+    }
+}
+
+fn row_to_observation(row: &rusqlite::Row) -> rusqlite::Result<Observation> {
+    Ok(Observation {
+        id: ObservationId::new(row.get(0)?),
+        sync_id: SyncId(row.get::<_, String>(1)?),
+        session_id: SessionId::new(row.get::<_, String>(2)?),
+        project: row.get(3)?,
+        observation_type: {
+            let v: u8 = row.get(4)?;
+            match v {
+                1 => ObservationType::ToolUse,
+                2 => ObservationType::FileChange,
+                3 => ObservationType::Command,
+                4 => ObservationType::FileRead,
+                5 => ObservationType::Search,
+                6 => ObservationType::Decision,
+                7 => ObservationType::Architecture,
+                8 => ObservationType::Bugfix,
+                9 => ObservationType::Pattern,
+                10 => ObservationType::Config,
+                11 => ObservationType::Discovery,
+                12 => ObservationType::Learning,
+                _ => ObservationType::Manual,
+            }
+        },
+        title: row.get(5)?,
+        content: row.get(6)?,
+        tool_name: row.get(7)?,
+        scope: {
+            let v: u8 = row.get(8)?;
+            if v == 1 { Scope::Personal } else { Scope::Project }
+        },
+        topic_key: row.get(9)?,
+        content_hash: {
+            let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+            let mut arr = [0u8; 32];
+            let len = hash_bytes.len().min(32);
+            arr[..len].copy_from_slice(&hash_bytes[..len]);
+            ContentHash(arr)
+        },
+        revision_count: row.get(11)?,
+        duplicate_count: row.get(12)?,
+        last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
+        created_at: Timestamp(row.get(14)?),
+        updated_at: Timestamp(row.get(15)?),
+        deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
+        integrity_hash: row.get(17)?,
+        classification: {
+            let v: u8 = row.get(18)?;
+            match v {
+                1 => Classification::Internal,
+                2 => Classification::Confidential,
+                3 => Classification::Secret,
+                4 => Classification::TopSecret,
+                _ => Classification::Public,
+            }
+        },
+    })
 }
 
 impl StoragePort for Database {
@@ -645,7 +932,13 @@ impl StoragePort for Database {
                     }
                 },
                 topic_key: row.get(9)?,
-                content_hash: ContentHash::zero(),
+                content_hash: {
+                        let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+                        let mut arr = [0u8; 32];
+                        let len = hash_bytes.len().min(32);
+                        arr[..len].copy_from_slice(&hash_bytes[..len]);
+                        ContentHash(arr)
+                    },
                 revision_count: row.get(11)?,
                 duplicate_count: row.get(12)?,
                 last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
@@ -715,7 +1008,13 @@ impl StoragePort for Database {
                     }
                 },
                 topic_key: row.get(9)?,
-                content_hash: ContentHash::zero(),
+                content_hash: {
+                        let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+                        let mut arr = [0u8; 32];
+                        let len = hash_bytes.len().min(32);
+                        arr[..len].copy_from_slice(&hash_bytes[..len]);
+                        ContentHash(arr)
+                    },
                 revision_count: row.get(11)?,
                 duplicate_count: row.get(12)?,
                 last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
@@ -784,7 +1083,13 @@ impl StoragePort for Database {
                     }
                 },
                 topic_key: row.get(9)?,
-                content_hash: ContentHash::zero(),
+                content_hash: {
+                        let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+                        let mut arr = [0u8; 32];
+                        let len = hash_bytes.len().min(32);
+                        arr[..len].copy_from_slice(&hash_bytes[..len]);
+                        ContentHash(arr)
+                    },
                 revision_count: row.get(11)?,
                 duplicate_count: row.get(12)?,
                 last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
@@ -816,16 +1121,43 @@ impl StoragePort for Database {
 }
 
 impl SessionPort for Database {
-    fn start_session(&self, project: &str, _directory: &str) -> Result<SessionId> {
-        Ok(SessionId::new(project))
+    fn start_session(&self, project: &str, directory: &str) -> Result<SessionId> {
+        let conn = self.get_conn();
+        let now = Timestamp::now().0;
+        let id = SessionId::new(directory);
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions (id, project_key, directory, started_at, observation_count) VALUES (?1, ?2, ?3, ?4, 0)",
+            params![id.0, project, directory, now],
+        )?;
+        Ok(id)
     }
 
-    fn end_session(&self, _id: &SessionId, _summary: Option<String>) -> Result<()> {
+    fn end_session(&self, id: &SessionId, summary: Option<String>) -> Result<()> {
+        let conn = self.get_conn();
+        let now = Timestamp::now().0;
+        conn.execute(
+            "UPDATE sessions SET ended_at = ?1, summary = COALESCE(?2, summary) WHERE id = ?3",
+            params![now, summary, id.0],
+        )?;
         Ok(())
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
-        Ok(vec![])
+        let conn = self.get_conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_key, started_at, ended_at, summary, observation_count FROM sessions ORDER BY started_at DESC LIMIT 50"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SessionSummary {
+                id: SessionId::new(row.get::<_, String>(0)?),
+                project: row.get(1)?,
+                started_at: Timestamp(row.get(3)?),
+                ended_at: row.get::<_, Option<i64>>(4)?.map(Timestamp),
+                summary: row.get(5)?,
+                observation_count: row.get(6)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 }
 

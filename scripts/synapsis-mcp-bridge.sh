@@ -3,6 +3,12 @@
 # Usage: ./synapsis-mcp-bridge.sh [--url HOST:PORT]
 
 SYNAPSIS_URL="${SYNAPSIS_URL:-127.0.0.1:7438}"
+SOCAT="$(which socat 2>/dev/null)"
+
+if [ -z "$SOCAT" ]; then
+    echo '{"error":"socat not found. Install with: pacman -S socat"}' >&2
+    exit 1
+fi
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -32,7 +38,7 @@ parse_json() {
 }
 
 # Register as MCP client
-REGISTER_RESP=$(echo '{"jsonrpc":"2.0","method":"session_register","params":{"arguments":{"agent_type":"mcp-client","project":"default"}},"id":1}' | nc -w 2 "$SYNAPSIS_URL")
+REGISTER_RESP=$(echo '{"jsonrpc":"2.0","method":"session_register","params":{"arguments":{"agent_type":"mcp-client","project":"default"}},"id":1}' | $SOCAT - "TCP:$SYNAPSIS_URL,connect-timeout=2")
 SESSION=$(parse_json "$REGISTER_RESP" "session_id")
 
 if [ -z "$SESSION" ] || [ "$SESSION" = "" ]; then
@@ -45,7 +51,7 @@ echo "Connected to Synapsis as $SESSION" >&2
 # Heartbeat loop in background
 (
     while true; do
-        echo '{"jsonrpc":"2.0","method":"agent_heartbeat","params":{"arguments":{"session_id":"'$SESSION'"}},"id":"h"}' | nc -w 1 "$SYNAPSIS_URL" > /dev/null 2>&1
+        echo '{"jsonrpc":"2.0","method":"agent_heartbeat","params":{"arguments":{"session_id":"'$SESSION'"}},"id":"h"}' | $SOCAT - "TCP:$SYNAPSIS_URL,connect-timeout=1" > /dev/null 2>&1
         sleep 20
     done
 ) &
@@ -54,11 +60,7 @@ HEARTBEAT_PID=$!
 # Trap to clean up
 trap "kill $HEARTBEAT_PID 2>/dev/null; exit" EXIT INT TERM
 
-# Relay MCP stdin/stdout
-while IFS= read -r line; do
-    if [ -n "$line" ]; then
-        echo "$line" | nc -w 2 "$SYNAPSIS_URL"
-    fi
-done
+# Relay MCP stdin/stdout using socat bidirectional
+$SOCAT - "TCP:$SYNAPSIS_URL,connect-timeout=2"
 
 kill $HEARTBEAT_PID 2>/dev/null

@@ -178,7 +178,7 @@ pub struct FilesystemWatchdog {
     event_counter: AtomicU64,
     events: Arc<std::sync::RwLock<Vec<WatchEvent>>>,
     snapshots: Arc<std::sync::RwLock<HashMap<String, FileSnapshot>>>,
-    running: AtomicBool,
+    running: Arc<AtomicBool>,
     log_path: PathBuf,
 }
 
@@ -196,7 +196,7 @@ impl FilesystemWatchdog {
             event_counter: AtomicU64::new(0),
             events: Arc::new(std::sync::RwLock::new(Vec::new())),
             snapshots: Arc::new(std::sync::RwLock::new(HashMap::new())),
-            running: AtomicBool::new(false),
+            running: Arc::new(AtomicBool::new(false)),
             log_path,
         };
 
@@ -473,17 +473,11 @@ impl FilesystemWatchdog {
 
         eprintln!("[Watchdog] Starting filesystem monitoring...");
 
-        // In a full implementation, this would use inotify on Linux
-        // For now, we'll do periodic verification
-        let _config = self.config.clone();
-        let _events = Arc::clone(&self.events);
+        let running = Arc::clone(&self.running);
 
         std::thread::spawn(move || {
-            // Periodic verification loop
-            loop {
-                std::thread::sleep(Duration::from_secs(60)); // Check every minute
-
-                // In production, this would use inotify for real-time monitoring
+            while running.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_secs(60));
             }
         });
     }

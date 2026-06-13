@@ -8,6 +8,8 @@ use crate::domain::types::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +167,8 @@ pub struct SkillRegistry {
     skills: Arc<RwLock<HashMap<SkillId, Skill>>>,
     activations: Arc<RwLock<Vec<SkillActivation>>>,
     data_dir: PathBuf,
+    dirty: AtomicBool,
+    last_save: std::sync::Mutex<Instant>,
 }
 
 impl SkillRegistry {
@@ -179,6 +183,8 @@ impl SkillRegistry {
             skills: Arc::new(RwLock::new(HashMap::new())),
             activations: Arc::new(RwLock::new(Vec::new())),
             data_dir,
+            dirty: AtomicBool::new(false),
+            last_save: std::sync::Mutex::new(Instant::now()),
         }
     }
 
@@ -209,6 +215,23 @@ impl SkillRegistry {
         Ok(())
     }
 
+    fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Relaxed);
+        let elapsed = self.last_save.lock().unwrap().elapsed();
+        if elapsed >= std::time::Duration::from_millis(500) {
+            let _ = self.flush();
+        }
+    }
+
+    pub fn flush(&self) -> std::io::Result<()> {
+        if self.dirty.swap(false, Ordering::Relaxed) {
+            *self.last_save.lock().unwrap() = Instant::now();
+            self.save()
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn save(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.data_dir)?;
 
@@ -230,13 +253,13 @@ impl SkillRegistry {
     pub fn register(&self, skill: Skill) -> SkillId {
         let id = skill.id.clone();
         self.skills.write().unwrap().insert(id.clone(), skill);
-        let _ = self.save();
+        self.mark_dirty();
         id
     }
 
     pub fn unregister(&self, id: &SkillId) -> Option<Skill> {
         let skill = self.skills.write().unwrap().remove(id);
-        let _ = self.save();
+        self.mark_dirty();
         skill
     }
 
@@ -285,7 +308,7 @@ impl SkillRegistry {
         if let Some(skill) = self.skills.write().unwrap().get_mut(id) {
             skill.enabled = true;
             skill.updated_at = Timestamp::now();
-            let _ = self.save();
+            self.mark_dirty();
             true
         } else {
             false
@@ -296,7 +319,7 @@ impl SkillRegistry {
         if let Some(skill) = self.skills.write().unwrap().get_mut(id) {
             skill.enabled = false;
             skill.updated_at = Timestamp::now();
-            let _ = self.save();
+            self.mark_dirty();
             true
         } else {
             false
@@ -320,7 +343,7 @@ impl SkillRegistry {
         activation.context = context.to_string();
 
         self.activations.write().unwrap().push(activation.clone());
-        let _ = self.save();
+        self.mark_dirty();
 
         Some(activation)
     }
@@ -335,7 +358,7 @@ impl SkillRegistry {
         if let Some(act) = activations.iter_mut().find(|a| a.id == *activation_id) {
             act.deactivate(success, error);
             drop(activations);
-            let _ = self.save();
+            self.mark_dirty();
             true
         } else {
             false
@@ -373,6 +396,8 @@ impl Clone for SkillRegistry {
             skills: self.skills.clone(),
             activations: self.activations.clone(),
             data_dir: self.data_dir.clone(),
+            dirty: AtomicBool::new(false),
+            last_save: std::sync::Mutex::new(Instant::now()),
         }
     }
 }

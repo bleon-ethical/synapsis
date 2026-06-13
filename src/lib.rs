@@ -1,5 +1,7 @@
 //! Synapsis - Persistent Memory Engine for AI Agents
 
+#![recursion_limit = "512"]
+
 pub mod core;
 pub mod domain;
 pub mod infrastructure;

@@ -35,6 +35,7 @@ impl Observation {
         content: String,
     ) -> Self {
         let now = Timestamp::now();
+        let content_hash = ContentHash::from_content(&content);
         Self {
             id: ObservationId::INVALID,
             sync_id: SyncId::new(),
@@ -46,7 +47,7 @@ impl Observation {
             project: None,
             scope: Scope::Project,
             topic_key: None,
-            content_hash: ContentHash::zero(),
+            content_hash,
             revision_count: 1,
             duplicate_count: 1,
             last_seen_at: None,

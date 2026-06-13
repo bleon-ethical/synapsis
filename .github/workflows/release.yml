@@ -1,18 +1,23 @@
 name: Release
-
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build but do not publish'
+        required: true
+        default: true
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: 2
 
 jobs:
-  release:
-    name: Build & Publish Release
-    runs-on: ${{ matrix.os }}
+  build:
+    name: Build ${{ matrix.target }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -25,56 +30,43 @@ jobs:
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-rel-${{ hashFiles('Cargo.lock') }}
-
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --bin synapsis --bin synapsis-mcp --bin synapsis-server
-
+          key: ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }} --bin synapsis --bin synapsis-mcp --bin synapsis-server
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p release/synapsis
-          cp target/${{ matrix.target }}/release/synapsis release/synapsis/
-          cp target/${{ matrix.target }}/release/synapsis-mcp release/synapsis/
-          cp target/${{ matrix.target }}/release/synapsis-server release/synapsis/
-          cp install.sh release/synapsis/
-          cp README.md release/synapsis/
-          strip release/synapsis/synapsis release/synapsis/synapsis-mcp release/synapsis/synapsis-server 2>/dev/null || true
-          cd release && tar czf synapsis-${{ matrix.target }}.tar.gz synapsis/
-
+          for bin in synapsis synapsis-mcp synapsis-server; do
+            cp "target/${{ matrix.target }}/release/$bin" release/synapsis/
+            strip "release/synapsis/$bin" 2>/dev/null || true
+          done
+          cp README.md LICENSE release/synapsis/ 2>/dev/null || true
+          cd release && tar czf "synapsis-${{ matrix.target }}.tar.gz" synapsis/
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir -p release/synapsis
-          copy target\${{ matrix.target }}\release\synapsis.exe release\synapsis\
-          copy target\${{ matrix.target }}\release\synapsis-mcp.exe release\synapsis\
-          copy target\${{ matrix.target }}\release\synapsis-server.exe release\synapsis\
-          copy install.ps1 release\synapsis\
-          copy README.md release\synapsis\
-          Compress-Archive -Path release\synapsis -DestinationPath release\synapsis-${{ matrix.target }}.zip
-
-      - name: Upload to Release
+          for bin in synapsis.exe synapsis-mcp.exe synapsis-server.exe; do
+            cp "target/${{ matrix.target }}/release/$bin" release/synapsis/
+          done
+          cp README.md LICENSE release/synapsis/ 2>$null || $null
+          Compress-Archive -Path release/synapsis -DestinationPath "release/synapsis-${{ matrix.target }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synapsis-${{ matrix.target }}
+          path: release/synapsis-*
+      - name: Upload to release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !inputs.dry_run
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release/synapsis-*.tar.gz
-            release/synapsis-*.zip
+          files: release/synapsis-*
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          fail_on_unmatched_files: false

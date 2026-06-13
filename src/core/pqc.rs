@@ -1,15 +1,16 @@
-//! PQC (Post-Quantum Cryptography) Stub
-//!
-//! Placeholder for PQC implementation.
-//! Uses simple crypto when PQC is not available.
+//! Symmetric encryption with persistent key derivation.
+//! NOTE: Uses AES-256-GCM, not post-quantum cryptography.
+//! For actual PQC, integrate pqcrypto-kyber/dilithium crates.
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use rand::RngCore;
+use sha2::{Sha256, Digest};
 
-/// Encrypt data with AES-256-GCM
+/// Encrypt data with AES-256-GCM using a key derived from SYNAPSIS_DB_KEY or a fixed app key.
+/// The key is deterministic — same input always produces the same key.
 pub fn encrypt(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| format!("Key error: {}", e))?;
 

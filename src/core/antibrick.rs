@@ -140,10 +140,12 @@ impl AntiBrickEngine {
     fn test_ai_availability(&self) {
         let available = self.check_ai_available();
         self.ai_available.store(available, Ordering::Relaxed);
-        eprintln!(
-            "[AntiBrick] AI availability: {}",
-            if available { "✅" } else { "❌" }
-        );
+        if std::env::var("SYNAPSIS_LOG").as_deref() == Ok("debug") {
+            eprintln!(
+                "[AntiBrick] AI availability: {}",
+                if available { "yes" } else { "no" }
+            );
+        }
     }
 
     fn check_ai_available(&self) -> bool {
@@ -535,8 +537,9 @@ impl AntiBrickEngine {
     fn compute_event_hash(&self, id: u64, timestamp: u64, cmd: &str, args: &[String]) -> String {
         use hmac_sha1::hmac_sha1;
         let data = format!("{}:{}:{}:{:?}", id, timestamp, cmd, args);
-        let key = b"synapsis-antibrick-secret";
-        let hash = hmac_sha1(key, data.as_bytes());
+        // Derive HMAC key from SYNAPSIS_DB_KEY or fallback to a fixed key
+        let key = derive_antibrick_key();
+        let hash = hmac_sha1(&key, data.as_bytes());
         hex::encode(&hash[..8])
     }
 
@@ -783,6 +786,26 @@ pub mod mcp_tools {
             "message": if enable { "Anti-brick protection ENABLED" } else { "Anti-brick protection DISABLED" }
         })
     }
+}
+
+/// Derive HMAC key from SYNAPSIS_DB_KEY or environment.
+fn derive_antibrick_key() -> Vec<u8> {
+    if let Ok(hex_key) = std::env::var("SYNAPSIS_DB_KEY") {
+        if let Ok(decoded) = hex::decode(&hex_key) {
+            if !decoded.is_empty() {
+                return decoded;
+            }
+        }
+    }
+    if let Ok(b64_key) = std::env::var("SYNAPSIS_DB_KEY_BASE64") {
+        use base64::Engine as _;
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&b64_key) {
+            if !decoded.is_empty() {
+                return decoded;
+            }
+        }
+    }
+    b"synapsis-antibrick-secret".to_vec()
 }
 
 #[cfg(test)]

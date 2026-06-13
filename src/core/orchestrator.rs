@@ -752,6 +752,15 @@ impl Orchestrator {
             .map(|m| m.payload)
     }
 
+    pub fn list_tasks(&self) -> Vec<(String, String)> {
+        let tasks = self.tasks.lock().unwrap();
+        let mut result: Vec<(String, String)> = tasks.iter()
+            .map(|(id, t)| (id.clone(), format!("{:?}", t.status)))
+            .collect();
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result
+    }
+
     pub fn create_task(
         &self,
         description: &str,
@@ -792,42 +801,38 @@ impl Orchestrator {
     }
 
     pub fn assign_task(&self, task_id: &str, agent_id: &str) -> bool {
-        let agent_type = {
-            let agents = self.agents.lock().unwrap();
-            agents
-                .get(agent_id)
-                .map(|a| a.agent_type.clone())
-                .unwrap_or_default()
-        };
+        // Hold both locks together for atomicity
+        let mut agents = self.agents.lock().unwrap();
+        let mut tasks = self.tasks.lock().unwrap();
+
+        let agent_type = agents.get(agent_id).map(|a| a.agent_type.clone()).unwrap_or_default();
         if !self.resource_manager.can_accept_task(&agent_type) {
             self.log_message("resource_manager", Some(agent_id), MessageType::Coordination, serde_json::json!({
                 "action": "task_throttled", "task_id": task_id, "agent_id": agent_id, "reason": "system_resources_exceeded"
             }));
             return false;
         }
-        let task_desc = {
-            let mut tasks = self.tasks.lock().unwrap();
-            if let Some(task) = tasks.get_mut(task_id) {
-                task.status = TaskStatus::Assigned;
-                task.assigned_to = Some(agent_id.to_string());
-                Some(task.description.clone())
-            } else {
-                None
-            }
+
+        let task_desc = if let Some(task) = tasks.get_mut(task_id) {
+            task.status = TaskStatus::Assigned;
+            task.assigned_to = Some(agent_id.to_string());
+            Some(task.description.clone())
+        } else {
+            None
         };
+
         if let Some(desc) = task_desc {
-            let mut agents = self.agents.lock().unwrap();
             if let Some(agent) = agents.get_mut(agent_id) {
                 agent.status = AgentStatus::Busy;
                 agent.current_task = Some(task_id.to_string());
                 agent.workload += 1;
-                self.resource_manager
-                    .update_agent_task_count(agent_id, agent.workload as usize);
+                self.resource_manager.update_agent_task_count(agent_id, agent.workload as usize);
             }
+            let priority = tasks.get(task_id).map(|t| t.priority).unwrap_or(0);
             drop(agents);
+            drop(tasks);
             self.log_message("orchestrator", Some(agent_id), MessageType::TaskResponse, serde_json::json!({
-                "action": "task_assigned", "task_id": task_id, "description": desc,
-                "priority": self.tasks.lock().unwrap().get(task_id).map(|t| t.priority).unwrap_or(0)
+                "action": "task_assigned", "task_id": task_id, "description": desc, "priority": priority
             }));
             true
         } else {

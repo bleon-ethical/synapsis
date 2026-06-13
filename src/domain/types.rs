@@ -211,6 +211,13 @@ impl ContentHash {
     pub fn zero() -> Self {
         Self([0u8; 32])
     }
+    pub fn from_content(content: &str) -> Self {
+        use sha2::Digest;
+        let hash = sha2::Sha256::digest(content.as_bytes());
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&hash);
+        Self(arr)
+    }
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }

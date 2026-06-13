@@ -1,0 +1,59 @@
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  **Full Changelog**: $REPOSITORY/compare/$PREVIOUS_TAG...$RELEASE_TAG
+
+categories:
+  - title: 'Breaking Changes'
+    labels:
+      - 'breaking'
+  - title: 'New Features'
+    labels:
+      - 'enhancement'
+      - 'feature'
+  - title: 'Bug Fixes'
+    labels:
+      - 'bug'
+      - 'fix'
+  - title: 'Database'
+    labels:
+      - 'database'
+      - 'schema'
+  - title: 'MCP Tools'
+    labels:
+      - 'mcp'
+      - 'tool'
+  - title: 'Config & CI'
+    labels:
+      - 'config'
+      - 'ci'
+  - title: 'Documentation'
+    labels:
+      - 'documentation'
+      - 'docs'
+  - title: 'Dependencies'
+    labels:
+      - 'dependencies'
+
+exclude-labels:
+  - 'skip-changelog'
+
+version-resolver:
+  major:
+    labels:
+      - 'breaking'
+  minor:
+    labels:
+      - 'enhancement'
+      - 'feature'
+      - 'mcp'
+      - 'tool'
+  patch:
+    labels:
+      - 'bug'
+      - 'fix'
+      - 'database'
+      - 'dependencies'
+  default: patch

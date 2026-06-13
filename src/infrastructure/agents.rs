@@ -8,6 +8,8 @@ use crate::core::uuid::Uuid;
 use crate::domain::types::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -306,6 +308,8 @@ pub struct AgentRegistry {
     messages: Arc<RwLock<Vec<AgentMessage>>>,
     tasks: Arc<RwLock<Vec<Task>>>,
     data_dir: PathBuf,
+    dirty: AtomicBool,
+    last_save: std::sync::Mutex<Instant>,
 }
 
 impl AgentRegistry {
@@ -321,6 +325,8 @@ impl AgentRegistry {
             messages: Arc::new(RwLock::new(Vec::new())),
             tasks: Arc::new(RwLock::new(Vec::new())),
             data_dir,
+            dirty: AtomicBool::new(false),
+            last_save: std::sync::Mutex::new(Instant::now()),
         }
     }
 
@@ -350,6 +356,24 @@ impl AgentRegistry {
         Ok(())
     }
 
+    fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Relaxed);
+        // Debounce: only save if at least 500ms since last save
+        let elapsed = self.last_save.lock().unwrap().elapsed();
+        if elapsed >= std::time::Duration::from_millis(500) {
+            let _ = self.flush();
+        }
+    }
+
+    pub fn flush(&self) -> std::io::Result<()> {
+        if self.dirty.swap(false, Ordering::Relaxed) {
+            *self.last_save.lock().unwrap() = Instant::now();
+            self.save()
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn save(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.data_dir)?;
 
@@ -371,13 +395,13 @@ impl AgentRegistry {
     pub fn register(&self, agent: Agent) -> AgentId {
         let id = agent.id.clone();
         self.agents.write().unwrap().insert(id.clone(), agent);
-        let _ = self.save();
+        self.flush();
         id
     }
 
     pub fn unregister(&self, id: &AgentId) -> Option<Agent> {
         let agent = self.agents.write().unwrap().remove(id);
-        let _ = self.save();
+        self.flush();
         agent
     }
 
@@ -408,7 +432,7 @@ impl AgentRegistry {
             if state == AgentState::Working {
                 agent.update_activity();
             }
-            let _ = self.save();
+            self.mark_dirty();
             true
         } else {
             false
@@ -431,7 +455,7 @@ impl AgentRegistry {
         let msg = AgentMessage::new(from, to, content, msg_type);
         let id = msg.id.clone();
         self.messages.write().unwrap().push(msg);
-        let _ = self.save();
+        self.mark_dirty();
         Some(id)
     }
 
@@ -456,7 +480,7 @@ impl AgentRegistry {
         let task = Task::new(title, description, priority);
         let id = task.id.clone();
         self.tasks.write().unwrap().push(task);
-        let _ = self.save();
+        self.mark_dirty();
         id
     }
 
@@ -465,7 +489,7 @@ impl AgentRegistry {
         if let Some(task) = tasks.iter_mut().find(|t| t.id == *task_id) {
             task.assign(agent_id.clone());
             drop(tasks);
-            let _ = self.save();
+            self.mark_dirty();
             true
         } else {
             false
@@ -477,7 +501,7 @@ impl AgentRegistry {
         if let Some(task) = tasks.iter_mut().find(|t| t.id == *task_id) {
             task.complete(result);
             drop(tasks);
-            let _ = self.save();
+            self.mark_dirty();
             true
         } else {
             false
@@ -519,6 +543,8 @@ impl Clone for AgentRegistry {
             messages: self.messages.clone(),
             tasks: self.tasks.clone(),
             data_dir: self.data_dir.clone(),
+            dirty: AtomicBool::new(false),
+            last_save: std::sync::Mutex::new(Instant::now()),
         }
     }
 }

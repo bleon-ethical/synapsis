@@ -1,31 +1,31 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-title: '[BUG] '
+about: Report a reproducible bug
 labels: bug
-assignees: ''
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## Environment
+- Synapsis version: [e.g. 0.6.0]
+- Binary: [synapsis / synapsis-mcp / synapsis-server]
+- OS: [e.g. Ubuntu 24.04, macOS 14]
+- Rust version: `rustc --version`
+- Database encryption: [yes / no]
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+## Description
+Clear and concise description of the bug.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+## Steps to reproduce
+1. Run `...`
+2. Call tool `...` with arguments `...`
+3. See error
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+## Expected behavior
+What should happen instead.
 
-**System Information:**
- - OS: [e.g. Ubuntu 24.04]
- - Rust version: [e.g. 1.75]
- - Synapsis version: [e.g. 0.1.0]
+## Actual behavior
+Full error output. Include `SYNAPSIS_LOG=debug` output if possible.
 
-**Additional context**
-Add any other context about the problem here.
+## Additional context
+- Does it happen every time?
+- Does it happen with `SYNAPSIS_QUIET=1`?
+- Any recent schema changes?
