@@ -28,19 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone synapsis-core
-        run: git clone --depth 1 https://github.com/MethodWhite/synapsis-core.git synapsis-core
-
-      - name: Clone prusia-vault
-        run: git clone --depth 1 https://github.com/MethodWhite/prusia-vault.git prusia-vault
-
-      - name: Fix path dependencies
-        run: |
-          sed -i 's|path = "../synapsis-core"|path = "synapsis-core"|' Cargo.toml
-          sed -i 's|path = "../prusia-vault"|path = "prusia-vault"|' Cargo.toml
-
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           targets: ${{ matrix.target }}
 
@@ -51,19 +40,21 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-rel-${{ hashFiles('Cargo.toml') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-rel-${{ hashFiles('Cargo.lock') }}
 
-      - name: Build synapsis
-        run: cargo build --release --target ${{ matrix.target }} --bin synapsis --bin synapsis-mcp
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} --bin synapsis --bin synapsis-mcp --bin synapsis-server
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p release/synapsis
           cp target/${{ matrix.target }}/release/synapsis release/synapsis/
-          cp target/${{ matrix.target }}/release/synapsis-mcp release/synapsis/ 2>/dev/null || true
+          cp target/${{ matrix.target }}/release/synapsis-mcp release/synapsis/
+          cp target/${{ matrix.target }}/release/synapsis-server release/synapsis/
           cp install.sh release/synapsis/
-          strip release/synapsis/synapsis release/synapsis/synapsis-mcp 2>/dev/null || true
+          cp README.md release/synapsis/
+          strip release/synapsis/synapsis release/synapsis/synapsis-mcp release/synapsis/synapsis-server 2>/dev/null || true
           cd release && tar czf synapsis-${{ matrix.target }}.tar.gz synapsis/
 
       - name: Package (Windows)
@@ -71,7 +62,10 @@ jobs:
         run: |
           mkdir -p release/synapsis
           copy target\${{ matrix.target }}\release\synapsis.exe release\synapsis\
-          copy target\${{ matrix.target }}\release\synapsis-mcp.exe release\synapsis\ 2>$null || true
+          copy target\${{ matrix.target }}\release\synapsis-mcp.exe release\synapsis\
+          copy target\${{ matrix.target }}\release\synapsis-server.exe release\synapsis\
+          copy install.ps1 release\synapsis\
+          copy README.md release\synapsis\
           Compress-Archive -Path release\synapsis -DestinationPath release\synapsis-${{ matrix.target }}.zip
 
       - name: Upload to Release
