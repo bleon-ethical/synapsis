@@ -78,8 +78,9 @@ impl Database {
                     match Connection::open(&db_path) {
                         Ok(c) => c,
                         Err(e2) => {
-                            db_warn!("[Database] Fatal: cannot open database: {}", e2);
-                            std::process::exit(1);
+                            db_warn!("[Database] Falling back to in-memory DB: {}", e2);
+                            Connection::open_in_memory()
+                                .expect("in-memory DB")
                         }
                     }
                 }
@@ -88,8 +89,9 @@ impl Database {
             match Connection::open(&db_path) {
                 Ok(c) => c,
                 Err(e) => {
-                    db_warn!("[Database] Fatal: cannot open database: {}", e);
-                    std::process::exit(1);
+                    db_warn!("[Database] Falling back to in-memory DB: {}", e);
+                    Connection::open_in_memory()
+                        .expect("in-memory DB")
                 }
             }
         };
