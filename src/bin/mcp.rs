@@ -14,7 +14,10 @@ fn main() {
     server.init();
 
     if !quiet {
-        eprintln!("[synapsis-mcp] v{} ready (stdio)", env!("CARGO_PKG_VERSION"));
+        eprintln!(
+            "[synapsis-mcp] v{} ready (stdio)",
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
     if let Err(e) = server.run() {

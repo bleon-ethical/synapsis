@@ -754,7 +754,8 @@ impl Orchestrator {
 
     pub fn list_tasks(&self) -> Vec<(String, String)> {
         let tasks = self.tasks.lock().unwrap();
-        let mut result: Vec<(String, String)> = tasks.iter()
+        let mut result: Vec<(String, String)> = tasks
+            .iter()
             .map(|(id, t)| (id.clone(), format!("{:?}", t.status)))
             .collect();
         result.sort_by(|a, b| a.0.cmp(&b.0));
@@ -805,7 +806,10 @@ impl Orchestrator {
         let mut agents = self.agents.lock().unwrap();
         let mut tasks = self.tasks.lock().unwrap();
 
-        let agent_type = agents.get(agent_id).map(|a| a.agent_type.clone()).unwrap_or_default();
+        let agent_type = agents
+            .get(agent_id)
+            .map(|a| a.agent_type.clone())
+            .unwrap_or_default();
         if !self.resource_manager.can_accept_task(&agent_type) {
             self.log_message("resource_manager", Some(agent_id), MessageType::Coordination, serde_json::json!({
                 "action": "task_throttled", "task_id": task_id, "agent_id": agent_id, "reason": "system_resources_exceeded"
@@ -826,7 +830,8 @@ impl Orchestrator {
                 agent.status = AgentStatus::Busy;
                 agent.current_task = Some(task_id.to_string());
                 agent.workload += 1;
-                self.resource_manager.update_agent_task_count(agent_id, agent.workload as usize);
+                self.resource_manager
+                    .update_agent_task_count(agent_id, agent.workload as usize);
             }
             let priority = tasks.get(task_id).map(|t| t.priority).unwrap_or(0);
             drop(agents);

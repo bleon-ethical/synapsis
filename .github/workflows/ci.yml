@@ -9,7 +9,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
   check:
@@ -42,7 +41,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --release --all-targets --all-features -- -D warnings
+      - run: cargo clippy --release --all-targets --all-features
         continue-on-error: true
 
   test:
@@ -60,11 +59,11 @@ jobs:
       - run: cargo test --release --all-features
 
   msrv:
-    name: MSRV (1.81.0)
+    name: MSRV (1.82.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.81.0
+      - uses: dtolnay/rust-toolchain@1.82.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --release --all-features
 

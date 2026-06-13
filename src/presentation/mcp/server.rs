@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 macro_rules! info_log {
     ($($arg:tt)*) => {{
@@ -741,12 +741,7 @@ mod tools {
                 let t = r["title"].as_str().unwrap_or("");
                 let c = r["content"].as_str().unwrap_or("");
                 let preview: String = c.chars().take(200).collect();
-                lines.push(format!(
-                    "\n{}. **{}**\n   {}",
-                    i + 1,
-                    t,
-                    preview
-                ));
+                lines.push(format!("\n{}. **{}**\n   {}", i + 1, t, preview));
             }
             lines.join("\n")
         };
@@ -773,7 +768,9 @@ mod tools {
 
         let text = format!(
             "Context\n- Observations: {}\n- Recent chunks: {}\n- Project: {}",
-            obs, results.len(), project.unwrap_or("(all)")
+            obs,
+            results.len(),
+            project.unwrap_or("(all)")
         );
 
         Ok(json!({
@@ -1154,7 +1151,10 @@ mod tools {
         }))
     }
     pub fn handle_mcp_call(id: &Value, args: &Value) -> Result<Value> {
-        let server_url = args["server_url"].as_str().unwrap_or("").trim_end_matches('/');
+        let server_url = args["server_url"]
+            .as_str()
+            .unwrap_or("")
+            .trim_end_matches('/');
         let tool_name = args["tool_name"].as_str().unwrap_or("");
         let tool_args = args.get("arguments").cloned().unwrap_or(json!({}));
         let endpoint = args["endpoint"].as_str().unwrap_or("/message");
@@ -1222,17 +1222,21 @@ mod tools {
 
         let client = match client {
             Ok(c) => c,
-            Err(e) => return Ok(json!({
-                "jsonrpc": "2.0", "id": id,
-                "error": { "code": -32603, "message": format!("HTTP client error: {}", e) }
-            })),
+            Err(e) => {
+                return Ok(json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "error": { "code": -32603, "message": format!("HTTP client error: {}", e) }
+                }))
+            }
         };
 
         let response = if method == "POST" {
             let body = args["body"].as_str().unwrap_or("");
-            client.post(url)
+            client
+                .post(url)
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(body.to_string()).send()
+                .body(body.to_string())
+                .send()
         } else {
             client.get(url).send()
         };
@@ -1240,7 +1244,9 @@ mod tools {
         match response {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let content_type = resp.headers().get("content-type")
+                let content_type = resp
+                    .headers()
+                    .get("content-type")
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("unknown")
                     .to_string();
@@ -1386,10 +1392,12 @@ mod tools {
 
         let client = match client {
             Ok(c) => c,
-            Err(e) => return Ok(json!({
-                "jsonrpc": "2.0", "id": id,
-                "error": { "code": -32603, "message": format!("HTTP client error: {}", e) }
-            })),
+            Err(e) => {
+                return Ok(json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "error": { "code": -32603, "message": format!("HTTP client error: {}", e) }
+                }))
+            }
         };
 
         match client.get(url).send() {
@@ -1474,7 +1482,9 @@ fn try_extract_href(html: &str, start: usize) -> Option<String> {
             if *delimiter == ' ' {
                 // unquoted: read until space or >
                 let remaining = &html[val_start..];
-                let end = remaining.find(|c| c == ' ' || c == '>').unwrap_or(remaining.len());
+                let end = remaining
+                    .find(|c| c == ' ' || c == '>')
+                    .unwrap_or(remaining.len());
                 return Some(remaining[..end].to_string());
             }
             if let Some(href_end) = html[val_start..].find(*delimiter) {
@@ -1531,7 +1541,9 @@ fn strip_html(html: &str) -> String {
                 let mut tag_end = String::new();
                 for ch in chars.by_ref() {
                     tag_end.push(ch);
-                    if ch == '>' { break; }
+                    if ch == '>' {
+                        break;
+                    }
                 }
                 if tag_end.to_lowercase().starts_with("/script>") {
                     in_script = false;
@@ -1544,7 +1556,9 @@ fn strip_html(html: &str) -> String {
                 let mut tag_end = String::new();
                 for ch in chars.by_ref() {
                     tag_end.push(ch);
-                    if ch == '>' { break; }
+                    if ch == '>' {
+                        break;
+                    }
                 }
                 if tag_end.to_lowercase().starts_with("/style>") {
                     in_style = false;
@@ -1557,16 +1571,32 @@ fn strip_html(html: &str) -> String {
             let mut rest = String::new();
             for ch in chars.by_ref() {
                 if ch == '>' || ch == ' ' {
-                    if ch == '>' { break; }
+                    if ch == '>' {
+                        break;
+                    }
                     rest.push(ch);
                     break;
                 }
                 tag_name.push(ch);
             }
             let lower = tag_name.to_lowercase();
-            if lower == "script" { in_script = true; continue; }
-            if lower == "style" { in_style = true; continue; }
-            if lower == "br" || lower == "p" || lower == "/p" || lower == "div" || lower == "/div" || lower == "tr" || lower == "/tr" || lower == "li" {
+            if lower == "script" {
+                in_script = true;
+                continue;
+            }
+            if lower == "style" {
+                in_style = true;
+                continue;
+            }
+            if lower == "br"
+                || lower == "p"
+                || lower == "/p"
+                || lower == "div"
+                || lower == "/div"
+                || lower == "tr"
+                || lower == "/tr"
+                || lower == "li"
+            {
                 text.push('\n');
             }
             in_tag = true;
@@ -1595,7 +1625,9 @@ fn html_to_text(s: &str) -> String {
 
 fn format_size2(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
-    if bytes == 0 { return "0B".into(); }
+    if bytes == 0 {
+        return "0B".into();
+    }
     let mut size = bytes as f64;
     let mut unit = 0;
     while size >= 1024.0 && unit < UNITS.len() - 1 {
@@ -1618,7 +1650,9 @@ fn derive_encryption_key() -> [u8; 32] {
         }
     }
     use sha2::Digest;
-    let host = hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_default();
+    let host = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_default();
     let hash = sha2::Sha256::digest(host.as_bytes());
     let mut key = [0u8; 32];
     key.copy_from_slice(&hash);
@@ -1641,7 +1675,10 @@ fn format_args_snapshot(tool: &str, args: &Value) -> String {
                 Value::Number(n) => n.to_string(),
                 Value::Bool(b) => b.to_string(),
                 Value::Array(a) => format!("[{} items]", a.len()),
-                Value::Object(o) => format!("{{{}}}", o.keys().take(3).cloned().collect::<Vec<_>>().join(",")),
+                Value::Object(o) => format!(
+                    "{{{}}}",
+                    o.keys().take(3).cloned().collect::<Vec<_>>().join(",")
+                ),
                 _ => "?".to_string(),
             };
             parts.push(format!("{}={}", key, v));
@@ -1651,6 +1688,10 @@ fn format_args_snapshot(tool: &str, args: &Value) -> String {
         parts.truncate(3);
         parts.push("...".into());
     }
-    let args_str = if parts.is_empty() { "()".to_string() } else { parts.join(" ") };
+    let args_str = if parts.is_empty() {
+        "()".to_string()
+    } else {
+        parts.join(" ")
+    };
     format!("[{}] {}", tool, args_str)
 }

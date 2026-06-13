@@ -61,14 +61,20 @@ impl Database {
             match Connection::open(&db_path) {
                 Ok(conn) => {
                     let hex_key = hex::encode(key);
-                    if conn.execute_batch(&format!("PRAGMA key = 'x{}'", hex_key)).is_err() {
+                    if conn
+                        .execute_batch(&format!("PRAGMA key = 'x{}'", hex_key))
+                        .is_err()
+                    {
                         db_warn!("[Database] Warning: failed to set encryption key");
                     }
                     let _ = conn.execute_batch("PRAGMA cipher_version");
                     conn
                 }
                 Err(e) => {
-                    db_warn!("[Database] Warning: failed to open encrypted DB ({}), trying unencrypted", e);
+                    db_warn!(
+                        "[Database] Warning: failed to open encrypted DB ({}), trying unencrypted",
+                        e
+                    );
                     match Connection::open(&db_path) {
                         Ok(c) => c,
                         Err(e2) => {
@@ -125,17 +131,18 @@ impl Database {
                     obs_val.get("title").and_then(|t| t.as_str()),
                     obs_val.get("content").and_then(|c| c.as_str()),
                 ) {
-                    let session_id = obs_val.get("session_id")
+                    let session_id = obs_val
+                        .get("session_id")
                         .and_then(|s| s.as_str())
                         .unwrap_or("migrated");
                     let now = Timestamp::now().0;
                     let sync_id = SyncId::new();
-                    let obs_type: u8 = obs_val.get("observation_type")
+                    let obs_type: u8 = obs_val
+                        .get("observation_type")
                         .and_then(|t| t.as_u64())
                         .unwrap_or(0) as u8;
-                    let scope: u8 = obs_val.get("scope")
-                        .and_then(|s| s.as_u64())
-                        .unwrap_or(0) as u8;
+                    let scope: u8 =
+                        obs_val.get("scope").and_then(|s| s.as_u64()).unwrap_or(0) as u8;
                     use sha2::Digest;
                     let hash = sha2::Sha256::digest(content.as_bytes());
                     let _ = conn.execute(
@@ -156,9 +163,15 @@ impl Database {
                     ).ok();
                 }
             }
-            db_info!("[Database] Imported {} observations from JSON", observations.len());
+            db_info!(
+                "[Database] Imported {} observations from JSON",
+                observations.len()
+            );
         } else {
-            db_info!("[Database] No migration file found at {}", json_path.display());
+            db_info!(
+                "[Database] No migration file found at {}",
+                json_path.display()
+            );
         }
         Ok(())
     }
@@ -205,28 +218,9 @@ impl Database {
                 integrity_hash TEXT,
                 classification INTEGER NOT NULL DEFAULT 0
             );
-            CREATE TABLE IF NOT EXISTS observations_fts (
-                id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL
+            CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+                title, content
             );
-            CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts_index USING fts5(
-                title, content, content=observations_fts, content_rowid=id
-            );
-            CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-                INSERT INTO observations_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
-                INSERT INTO observations_fts_index(rowid, title, content) VALUES (new.id, new.title, new.content);
-            END;
-            CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-                INSERT INTO observations_fts(observations_fts, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
-                INSERT INTO observations_fts_index(observations_fts_index, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
-            END;
-            CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-                INSERT INTO observations_fts(observations_fts, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
-                INSERT INTO observations_fts_index(observations_fts_index, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
-                INSERT INTO observations_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
-                INSERT INTO observations_fts_index(rowid, title, content) VALUES (new.id, new.title, new.content);
-            END;
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 project_key TEXT NOT NULL,
@@ -315,8 +309,7 @@ impl Database {
         if version >= 1 && version < 2 {
             // Rebuild FTS index for existing observations
             let _ = conn.execute_batch(
-                "INSERT OR IGNORE INTO observations_fts(rowid, title, content) SELECT id, title, content FROM observations;
-                 INSERT OR IGNORE INTO observations_fts_index(rowid, title, content) SELECT id, title, content FROM observations;
+                "INSERT INTO observations_fts(rowid, title, content) SELECT id, title, content FROM observations;
                  INSERT INTO schema_version (version) VALUES (2);"
             );
         }
@@ -400,22 +393,22 @@ impl Database {
             params![now],
         )?;
 
-            // Only acquire if lock is free or expired
-            let existing: std::result::Result<String, _> = conn.query_row(
-                "SELECT agent_session_id FROM active_locks WHERE lock_key = ?1 AND expires_at > ?2",
-                params![lock_key, now],
-                |row| row.get(0),
-            );
-            match existing {
-                Ok(owner) if owner != session_id => Ok(false),
-                _ => {
-                    let result = conn.execute(
+        // Only acquire if lock is free or expired
+        let existing: std::result::Result<String, _> = conn.query_row(
+            "SELECT agent_session_id FROM active_locks WHERE lock_key = ?1 AND expires_at > ?2",
+            params![lock_key, now],
+            |row| row.get(0),
+        );
+        match existing {
+            Ok(owner) if owner != session_id => Ok(false),
+            _ => {
+                let result = conn.execute(
                         "INSERT OR REPLACE INTO active_locks (lock_key, agent_session_id, acquired_at, expires_at) VALUES (?, ?, ?, ?)",
                         params![lock_key, session_id, now, expires],
                     );
-                    Ok(result.is_ok())
-                }
+                Ok(result.is_ok())
             }
+        }
     }
 
     pub fn release_lock(&self, lock_key: &str) -> Result<()> {
@@ -654,7 +647,10 @@ impl Database {
     ) -> Result<Vec<serde_json::Value>> {
         let conn = self.get_conn();
         // Escape LIKE wildcards to prevent semantic injection
-        let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         let search_term = format!("%{}%", escaped);
 
         let mut stmt = if let Some(p) = project {
@@ -701,6 +697,10 @@ impl Database {
             "UPDATE observations SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
             rusqlite::params![now, id],
         )?;
+        let _ = conn.execute(
+            "INSERT INTO observations_fts(observations_fts, rowid, title, content) VALUES('delete', ?1, '', '')",
+            params![id],
+        );
         Ok(())
     }
 
@@ -733,6 +733,11 @@ impl Database {
             ],
         )?;
         let id = conn.last_insert_rowid();
+        // Sync FTS index
+        let _ = conn.execute(
+            "INSERT INTO observations_fts(rowid, title, content) VALUES (?1, ?2, ?3)",
+            params![id, obs.title, obs.content],
+        );
         Ok(ObservationId::new(id))
     }
 
@@ -740,12 +745,12 @@ impl Database {
         let conn = self.get_conn();
         let mut stmt = conn.prepare(
             "SELECT o.id, o.title, o.content, o.project, o.created_at, o.observation_type, o.scope
-             FROM observations_fts_index fts
-             JOIN observations o ON o.id = fts.rowid
-             WHERE observations_fts_index MATCH ?1
+             FROM observations_fts
+             JOIN observations o ON o.id = observations_fts.rowid
+             WHERE observations_fts MATCH ?1
              AND o.deleted_at IS NULL
              ORDER BY rank
-             LIMIT ?2"
+             LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![query, limit], |row| {
             Ok(serde_json::json!({
@@ -764,10 +769,14 @@ impl Database {
     pub fn backup_to(&self, path: &std::path::Path) -> Result<()> {
         let conn = self.get_conn();
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| SynapsisError::internal_bug(e.to_string()))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| SynapsisError::internal_bug(e.to_string()))?;
         }
-        conn.execute_batch(&format!("VACUUM INTO '{}'", path.display().to_string().replace('\'', "''")))
-            .map_err(|e| SynapsisError::internal_bug(e.to_string()))?;
+        conn.execute_batch(&format!(
+            "VACUUM INTO '{}'",
+            path.display().to_string().replace('\'', "''")
+        ))
+        .map_err(|e| SynapsisError::internal_bug(e.to_string()))?;
         db_info!("[Database] Backup saved to {}", path.display());
         Ok(())
     }
@@ -796,7 +805,11 @@ impl Database {
             params![Timestamp::now().0, cutoff],
         )?;
         if count > 0 {
-            db_info!("[Database] Pruned {} observations older than {} days", count, older_than_days);
+            db_info!(
+                "[Database] Pruned {} observations older than {} days",
+                count,
+                older_than_days
+            );
         }
         Ok(count as u64)
     }
@@ -839,7 +852,11 @@ fn row_to_observation(row: &rusqlite::Row) -> rusqlite::Result<Observation> {
         tool_name: row.get(7)?,
         scope: {
             let v: u8 = row.get(8)?;
-            if v == 1 { Scope::Personal } else { Scope::Project }
+            if v == 1 {
+                Scope::Personal
+            } else {
+                Scope::Project
+            }
         },
         topic_key: row.get(9)?,
         content_hash: {
@@ -933,12 +950,12 @@ impl StoragePort for Database {
                 },
                 topic_key: row.get(9)?,
                 content_hash: {
-                        let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
-                        let mut arr = [0u8; 32];
-                        let len = hash_bytes.len().min(32);
-                        arr[..len].copy_from_slice(&hash_bytes[..len]);
-                        ContentHash(arr)
-                    },
+                    let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+                    let mut arr = [0u8; 32];
+                    let len = hash_bytes.len().min(32);
+                    arr[..len].copy_from_slice(&hash_bytes[..len]);
+                    ContentHash(arr)
+                },
                 revision_count: row.get(11)?,
                 duplicate_count: row.get(12)?,
                 last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
@@ -1009,12 +1026,12 @@ impl StoragePort for Database {
                 },
                 topic_key: row.get(9)?,
                 content_hash: {
-                        let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
-                        let mut arr = [0u8; 32];
-                        let len = hash_bytes.len().min(32);
-                        arr[..len].copy_from_slice(&hash_bytes[..len]);
-                        ContentHash(arr)
-                    },
+                    let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+                    let mut arr = [0u8; 32];
+                    let len = hash_bytes.len().min(32);
+                    arr[..len].copy_from_slice(&hash_bytes[..len]);
+                    ContentHash(arr)
+                },
                 revision_count: row.get(11)?,
                 duplicate_count: row.get(12)?,
                 last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
@@ -1084,12 +1101,12 @@ impl StoragePort for Database {
                 },
                 topic_key: row.get(9)?,
                 content_hash: {
-                        let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
-                        let mut arr = [0u8; 32];
-                        let len = hash_bytes.len().min(32);
-                        arr[..len].copy_from_slice(&hash_bytes[..len]);
-                        ContentHash(arr)
-                    },
+                    let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+                    let mut arr = [0u8; 32];
+                    let len = hash_bytes.len().min(32);
+                    arr[..len].copy_from_slice(&hash_bytes[..len]);
+                    ContentHash(arr)
+                },
                 revision_count: row.get(11)?,
                 duplicate_count: row.get(12)?,
                 last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),

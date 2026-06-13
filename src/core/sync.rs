@@ -93,7 +93,11 @@ impl GitSyncEngine {
             manifest: RwLock::new(Manifest::new(String::new(), None)),
         }
     }
-    pub fn with_agent(agent_id: String, session_id: Option<String>, _config: GitSyncConfig) -> Self {
+    pub fn with_agent(
+        agent_id: String,
+        session_id: Option<String>,
+        _config: GitSyncConfig,
+    ) -> Self {
         Self {
             manifest: RwLock::new(Manifest::new(agent_id, session_id)),
         }
