@@ -14,7 +14,11 @@ impl From<rusqlite::Error> for SynapsisError {
             rusqlite::Error::SqliteFailure(e, _) => {
                 SynapsisError::new(ErrorKind::Storage, 0x0101, format!("SQLite error: {}", e))
             }
-            _ => SynapsisError::new(ErrorKind::Internal, 0x0A01, format!("Database error: {}", err))
+            _ => SynapsisError::new(
+                ErrorKind::Internal,
+                0x0A01,
+                format!("Database error: {}", err),
+            ),
         }
     }
 }

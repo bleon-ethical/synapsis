@@ -27,7 +27,11 @@ pub trait SyncPort: Send + Sync {
 
 pub trait MemoryPort: Send + Sync {
     fn save_memory(&self, memory: &super::entities::Memory) -> Result<()>;
-    fn get_memories(&self, agent_id: &str, session_id: Option<&str>) -> Result<Vec<super::entities::Memory>>;
+    fn get_memories(
+        &self,
+        agent_id: &str,
+        session_id: Option<&str>,
+    ) -> Result<Vec<super::entities::Memory>>;
     fn clear_memories(&self, agent_id: &str, session_id: Option<&str>) -> Result<()>;
 }
 

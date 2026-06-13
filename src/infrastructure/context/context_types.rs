@@ -32,8 +32,7 @@ pub enum ContextState {
     Cold,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Priority {
     Critical,
     High,
@@ -43,9 +42,7 @@ pub enum Priority {
     Frozen,
 }
 
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ContextType {
     #[default]
     Session,
@@ -54,7 +51,6 @@ pub enum ContextType {
     Conversation,
     System,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ContextRef {
@@ -285,6 +281,7 @@ impl Context {
     }
 }
 
+#[allow(dead_code)]
 pub struct ContextRegistry {
     hot_contexts: std::collections::HashMap<ContextId, Context>,
     warm_contexts: std::collections::HashMap<ContextId, Context>,
@@ -294,12 +291,14 @@ pub struct ContextRegistry {
     working_set: std::collections::HashSet<ContextId>,
 }
 
+#[allow(dead_code)]
 struct ColdRef {
     archived_at: Timestamp,
     priority: Priority,
     size_bytes: usize,
 }
 
+#[allow(dead_code)]
 struct RegistryConfig {
     max_hot: usize,
     max_warm: usize,

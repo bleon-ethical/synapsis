@@ -4,8 +4,8 @@
 //! Multiple CLI instances can run simultaneously with distinct identities.
 
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -44,9 +44,8 @@ fn get_secret_key() -> Vec<u8> {
 /// Generate HMAC-SHA256 signature for session data
 fn generate_signature(cli_type: &str, uuid: &str, timestamp: i64) -> String {
     let secret = get_secret_key();
-    let mut mac = HmacSha256::new_from_slice(&secret)
-        .expect("HMAC can take key of any size");
-    
+    let mut mac = HmacSha256::new_from_slice(&secret).expect("HMAC can take key of any size");
+
     let data = format!("{}|{}|{}", cli_type, uuid, timestamp);
     mac.update(data.as_bytes());
     let result = mac.finalize();
@@ -95,7 +94,6 @@ impl SessionId {
 
         hex::encode(buf)
     }
-
 }
 
 impl std::fmt::Display for SessionId {
@@ -133,7 +131,7 @@ impl SessionId {
             let instance_uuid = parts[1].to_string();
             let started_at: i64 = parts[4].parse().unwrap_or(0);
             let signature = generate_signature(&cli_type, &instance_uuid, started_at);
-            
+
             Some(Self {
                 cli_type,
                 instance_uuid,
@@ -149,7 +147,12 @@ impl SessionId {
 
     /// Verify session integrity using HMAC signature
     pub fn verify(&self) -> bool {
-        verify_signature(&self.cli_type, &self.instance_uuid, self.started_at, &self.signature)
+        verify_signature(
+            &self.cli_type,
+            &self.instance_uuid,
+            self.started_at,
+            &self.signature,
+        )
     }
 
     /// Check if this session is from the same CLI type
@@ -194,10 +197,13 @@ impl SessionRegistry {
     pub fn register(&mut self, session: SessionId) -> Option<&str> {
         // Verify signature before registering
         if !session.verify() {
-            eprintln!("[SessionRegistry] Invalid signature for session: {}", session.cli_type);
+            eprintln!(
+                "[SessionRegistry] Invalid signature for session: {}",
+                session.cli_type
+            );
             return None;
         }
-        
+
         let key = session.to_string();
         self.sessions.insert(key.clone(), session);
         self.sessions.get(&key).map(|s| s.instance_uuid.as_str())
@@ -299,6 +305,9 @@ mod tests {
         s1.cli_type = "tampered".to_string(); // Invalidate signature
 
         let result = registry.register(s1);
-        assert!(result.is_none(), "Should reject session with invalid signature");
+        assert!(
+            result.is_none(),
+            "Should reject session with invalid signature"
+        );
     }
 }

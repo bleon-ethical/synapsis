@@ -1,8 +1,7 @@
-use std::collections::HashMap;
+use crate::presentation::mcp::McpServer;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
-use crate::presentation::mcp::McpServer;
 
 pub struct HttpTransport {
     server: Arc<McpServer>,

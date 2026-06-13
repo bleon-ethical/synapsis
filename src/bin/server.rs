@@ -34,16 +34,25 @@ fn main() {
     }
 
     eprintln!("╔══════════════════════════════════════════════════════════╗");
-    eprintln!("║  Synapsis v{} - Unified MCP Server               ║", env!("CARGO_PKG_VERSION"));
+    eprintln!(
+        "║  Synapsis v{} - Unified MCP Server               ║",
+        env!("CARGO_PKG_VERSION")
+    );
     eprintln!("╠══════════════════════════════════════════════════════════╣");
 
     let db = Arc::new(synapsis::infrastructure::database::Database::new());
     let orchestrator = Arc::new(synapsis::core::orchestrator::Orchestrator::new());
-    let server = Arc::new(synapsis::presentation::mcp::McpServer::new(db, orchestrator));
+    let server = Arc::new(synapsis::presentation::mcp::McpServer::new(
+        db,
+        orchestrator,
+    ));
     server.init();
 
     if http_mode {
-        eprintln!("║  Transport: HTTP/SSE (port {})                      ║", port);
+        eprintln!(
+            "║  Transport: HTTP/SSE (port {})                      ║",
+            port
+        );
         eprintln!("╚══════════════════════════════════════════════════════════╝");
         let transport = synapsis::presentation::http::HttpTransport::new(server);
         transport.start(port);

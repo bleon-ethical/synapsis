@@ -37,8 +37,7 @@ pub struct TuiState {
     pub stats: Option<TuiStats>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AppMode {
     #[default]
     Timeline,
@@ -48,7 +47,6 @@ pub enum AppMode {
     Stats,
     ConfirmQuit,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuiStats {
@@ -71,6 +69,7 @@ impl Tui {
         Err(Box::new(SynapsisError::internal_unimplemented()))
     }
 
+    #[allow(dead_code)]
     fn refresh_data(&mut self) -> crate::domain::errors::Result<()> {
         let entries = self.storage.get_timeline(1000)?;
         self.state.observations = entries.into_iter().map(|e| e.observation).collect();
@@ -78,6 +77,7 @@ impl Tui {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn perform_search(&mut self) -> crate::domain::errors::Result<()> {
         let params = SearchParams::new(&self.state.search_query).with_limit(50);
         let results = self.storage.search_observations(&params)?;
@@ -86,6 +86,7 @@ impl Tui {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn calculate_stats(&mut self) -> crate::domain::errors::Result<()> {
         let entries = self.storage.get_timeline(0)?;
         let sessions = self.sessions.list_sessions()?;
@@ -519,9 +520,9 @@ mod tui_impl {
 
         fn render_stats(&self, f: &mut Frame, area: Rect) {
             if let Some(stats) = &self.state.stats {
-                let obs_count = stats["total_observations"].as_i64().unwrap_or(0).to_string();
-                let sess_count = stats["total_sessions"].as_i64().unwrap_or(0).to_string();
-                let storage_size = format!("{} bytes", stats["storage_size_bytes"].as_i64().unwrap_or(0));
+                let obs_count = stats.total_observations.to_string();
+                let sess_count = stats.total_sessions.to_string();
+                let storage_size = format!("{} bytes", stats.storage_size_bytes);
 
                 let rows = [
                     Row::new(["Total Observations", obs_count.as_str()]),

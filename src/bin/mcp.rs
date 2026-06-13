@@ -10,7 +10,10 @@ fn main() {
     server.init();
 
     eprintln!("╔══════════════════════════════════════════════════════════╗");
-    eprintln!("║  Synapsis v{} - MCP Server (stdio)               ║", env!("CARGO_PKG_VERSION"));
+    eprintln!(
+        "║  Synapsis v{} - MCP Server (stdio)               ║",
+        env!("CARGO_PKG_VERSION")
+    );
     eprintln!("║  Transport: stdio                                       ║");
     eprintln!("║  Multi-Agent: shared state via MCP tools                ║");
     eprintln!("╚══════════════════════════════════════════════════════════╝");

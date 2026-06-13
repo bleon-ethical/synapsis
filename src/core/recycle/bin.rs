@@ -7,9 +7,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use super::categorizer::{
-    MessageCategory, MessageMetadata, SmartCategorizer,
-};
+use super::categorizer::{MessageCategory, MessageMetadata, SmartCategorizer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecycledEntry {
@@ -263,7 +261,8 @@ impl RecycleBin {
         let content_str = std::str::from_utf8(content).unwrap_or("");
         let categorization = if let Some(ref meta) = metadata {
             let categorize_content = meta.method.as_deref().unwrap_or(content_str);
-            self.categorizer.categorize(categorize_content, metadata.as_ref())
+            self.categorizer
+                .categorize(categorize_content, metadata.as_ref())
         } else {
             self.categorizer.categorize(content_str, None)
         };

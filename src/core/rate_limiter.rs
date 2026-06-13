@@ -25,22 +25,24 @@ impl RateLimiter {
             max_tokens,
         }
     }
-    
+
     pub fn check(&self, session_id: &str) -> Result<(), RateLimitError> {
         let mut buckets = self.buckets.lock().unwrap();
         let now = Instant::now();
-        
-        let bucket = buckets.entry(session_id.to_string()).or_insert_with(|| TokenBucket {
-            tokens: self.max_tokens as f64,
-            last_refill: now,
-        });
-        
+
+        let bucket = buckets
+            .entry(session_id.to_string())
+            .or_insert_with(|| TokenBucket {
+                tokens: self.max_tokens as f64,
+                last_refill: now,
+            });
+
         // Refill tokens based on elapsed time
         let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
-        bucket.tokens = (bucket.tokens + elapsed * self.tokens_per_second as f64)
-            .min(self.max_tokens as f64);
+        bucket.tokens =
+            (bucket.tokens + elapsed * self.tokens_per_second as f64).min(self.max_tokens as f64);
         bucket.last_refill = now;
-        
+
         if bucket.tokens >= 1.0 {
             bucket.tokens -= 1.0;
             Ok(())
@@ -48,7 +50,7 @@ impl RateLimiter {
             Err(RateLimitError::TooManyRequests)
         }
     }
-    
+
     pub fn cleanup_old_buckets(&self, max_age: Duration) {
         let mut buckets = self.buckets.lock().unwrap();
         let now = Instant::now();
@@ -72,7 +74,7 @@ impl std::fmt::Display for RateLimitError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_rate_limiter() {
         let limiter = RateLimiter::new(10, 100);

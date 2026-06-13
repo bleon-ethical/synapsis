@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum MessageCategory {
     Critical,
     Sensitive,
@@ -24,7 +23,6 @@ impl Hash for MessageCategory {
         (*self as i32).hash(state);
     }
 }
-
 
 impl MessageCategory {
     pub fn ttl_seconds(&self) -> Option<i64> {
@@ -352,8 +350,7 @@ impl Default for SmartCategorizer {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MessageMetadata {
     pub task_id: Option<String>,
     pub agent_type: Option<String>,
@@ -363,7 +360,6 @@ pub struct MessageMetadata {
     pub is_encrypted: bool,
     pub is_broadcast: bool,
 }
-
 
 impl MessageMetadata {
     pub fn from_jsonrpc(content: &str) -> Option<Self> {

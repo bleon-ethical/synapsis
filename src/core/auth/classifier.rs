@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 // use std::time::{Duration, SystemTime};
 
@@ -148,8 +148,7 @@ pub struct DeviceRecord {
     pub device_type: DeviceType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DeviceType {
     Desktop,
     Laptop,
@@ -159,7 +158,6 @@ pub enum DeviceType {
     #[default]
     Unknown,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMetadata {
@@ -176,8 +174,7 @@ pub struct AgentMetadata {
     pub environment: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ClientType {
     Cli,
     Ide,
@@ -186,7 +183,6 @@ pub enum ClientType {
     #[default]
     Unknown,
 }
-
 
 impl ClientType {
     pub fn from_agent_type(agent_type: &str) -> Self {
@@ -303,9 +299,8 @@ impl AgentClassifier {
         let mut warnings = Vec::new();
         let mut blocked_reason = None;
 
-        let is_known_device = device_id.is_some_and(|id| {
-            self.device_registry.read().unwrap().contains_key(id)
-        });
+        let is_known_device =
+            device_id.is_some_and(|id| self.device_registry.read().unwrap().contains_key(id));
 
         let is_local = connection_type.is_local();
         let has_dilithium = metadata.has_dilithium_key && metadata.is_dilithium_verified;

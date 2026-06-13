@@ -1,5 +1,5 @@
 //! Critical Filesystem Watchdog
-//! 
+//!
 //! Monitors critical system paths for unauthorized modifications that could brick devices.
 //! Uses inotify on Linux for real-time monitoring.
 
@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 /// Watch event types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,9 +55,9 @@ pub struct CriticalPath {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MonitorMode {
-    ReadOnly,      // Block all writes
-    AuditOnly,     // Log but don't block
-    SmartMonitor,  // Use AI/heuristics to decide
+    ReadOnly,     // Block all writes
+    AuditOnly,    // Log but don't block
+    SmartMonitor, // Use AI/heuristics to decide
 }
 
 /// Watchdog configuration
@@ -120,7 +119,11 @@ impl WatchdogConfig {
                 severity: 4,
                 monitor_mode: MonitorMode::SmartMonitor,
                 allowed_operations: vec!["read".to_string(), "open".to_string()],
-                blocked_patterns: vec!["/dev/sd*".to_string(), "/dev/mmcblk*".to_string(), "/dev/nvme*".to_string()],
+                blocked_patterns: vec![
+                    "/dev/sd*".to_string(),
+                    "/dev/mmcblk*".to_string(),
+                    "/dev/nvme*".to_string(),
+                ],
             },
             CriticalPath {
                 path: "/proc".to_string(),
@@ -242,16 +245,17 @@ impl FilesystemWatchdog {
     }
 
     fn create_file_snapshot(&self, path: &Path) -> Result<FileSnapshot, String> {
-        let metadata = fs::metadata(path)
-            .map_err(|e| format!("Cannot read metadata: {}", e))?;
+        let metadata = fs::metadata(path).map_err(|e| format!("Cannot read metadata: {}", e))?;
 
         let hash = if self.config.enable_hash_verification && metadata.is_file() {
-            self.compute_file_hash(path).unwrap_or_else(|_| "unknown".to_string())
+            self.compute_file_hash(path)
+                .unwrap_or_else(|_| "unknown".to_string())
         } else {
             "disabled".to_string()
         };
 
-        let modified = metadata.modified()
+        let modified = metadata
+            .modified()
             .map(|t| t.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
             .unwrap_or(0);
 
@@ -270,11 +274,22 @@ impl FilesystemWatchdog {
         })
     }
 
-    fn walk_directory(&self, path: &Path, max_depth: usize, snapshots: &mut Vec<FileSnapshot>) -> Result<(), String> {
+    fn walk_directory(
+        &self,
+        path: &Path,
+        max_depth: usize,
+        snapshots: &mut Vec<FileSnapshot>,
+    ) -> Result<(), String> {
         self.walk_recursive(path, 0, max_depth, snapshots)
     }
 
-    fn walk_recursive(&self, path: &Path, current_depth: usize, max_depth: usize, snapshots: &mut Vec<FileSnapshot>) -> Result<(), String> {
+    fn walk_recursive(
+        &self,
+        path: &Path,
+        current_depth: usize,
+        max_depth: usize,
+        snapshots: &mut Vec<FileSnapshot>,
+    ) -> Result<(), String> {
         if current_depth > max_depth {
             return Ok(());
         }
@@ -284,7 +299,7 @@ impl FilesystemWatchdog {
 
         for entry in entries.flatten() {
             let entry_path = entry.path();
-            
+
             // Skip symlinks and special files
             if entry_path.is_symlink() {
                 continue;
@@ -303,10 +318,9 @@ impl FilesystemWatchdog {
     }
 
     fn compute_file_hash(&self, path: &Path) -> Result<String, String> {
-        use sha2::{Sha256, Digest};
-        
-        let content = fs::read(path)
-            .map_err(|e| format!("Cannot read file: {}", e))?;
+        use sha2::{Digest, Sha256};
+
+        let content = fs::read(path).map_err(|e| format!("Cannot read file: {}", e))?;
 
         let mut hasher = Sha256::new();
         hasher.update(&content);
@@ -323,7 +337,7 @@ impl FilesystemWatchdog {
         if let Some(store) = snapshots {
             for (path, original) in store.iter() {
                 let current_path = Path::new(path);
-                
+
                 if !current_path.exists() {
                     // File was deleted!
                     let event = self.create_event(
@@ -341,7 +355,8 @@ impl FilesystemWatchdog {
 
                 // Check if file was modified
                 if let Ok(metadata) = fs::metadata(current_path) {
-                    let current_modified = metadata.modified()
+                    let current_modified = metadata
+                        .modified()
                         .map(|t| t.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
                         .unwrap_or(0);
 
@@ -425,7 +440,7 @@ impl FilesystemWatchdog {
 
     fn log_event(&self, event: &WatchEvent) {
         let log_line = serde_json::to_string(event).unwrap_or_default();
-        
+
         if let Ok(mut file) = fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -434,7 +449,8 @@ impl FilesystemWatchdog {
             let _ = writeln!(file, "{}", log_line);
         }
 
-        eprintln!("[Watchdog] {} - {} - Severity: {}",
+        eprintln!(
+            "[Watchdog] {} - {} - Severity: {}",
             match &event.event_type {
                 WatchEventType::FileCreated => "📁 CREATED",
                 WatchEventType::FileModified => "📝 MODIFIED",
@@ -456,17 +472,17 @@ impl FilesystemWatchdog {
         }
 
         eprintln!("[Watchdog] Starting filesystem monitoring...");
-        
+
         // In a full implementation, this would use inotify on Linux
         // For now, we'll do periodic verification
-        let config = self.config.clone();
-        let events = Arc::clone(&self.events);
-        
+        let _config = self.config.clone();
+        let _events = Arc::clone(&self.events);
+
         std::thread::spawn(move || {
             // Periodic verification loop
             loop {
                 std::thread::sleep(Duration::from_secs(60)); // Check every minute
-                
+
                 // In production, this would use inotify for real-time monitoring
             }
         });
@@ -483,13 +499,7 @@ impl FilesystemWatchdog {
         self.events
             .read()
             .ok()
-            .map(|events| {
-                events.iter()
-                    .rev()
-                    .take(limit)
-                    .cloned()
-                    .collect()
-            })
+            .map(|events| events.iter().rev().take(limit).cloned().collect())
             .unwrap_or_default()
     }
 
@@ -497,7 +507,7 @@ impl FilesystemWatchdog {
     pub fn stats(&self) -> serde_json::Value {
         let events = self.events.read().map(|g| g.clone()).unwrap_or_default();
         let snapshots = self.snapshots.read().map(|g| g.clone()).unwrap_or_default();
-        
+
         let critical_count = events.iter().filter(|e| e.severity >= 4).count();
         let blocked_count = events.iter().filter(|e| e.blocked).count();
 
@@ -546,7 +556,10 @@ pub mod mcp_tools {
         })
     }
 
-    pub fn handle_watchdog_snapshot(watchdog: &FilesystemWatchdog, path: String) -> serde_json::Value {
+    pub fn handle_watchdog_snapshot(
+        watchdog: &FilesystemWatchdog,
+        path: String,
+    ) -> serde_json::Value {
         match watchdog.snapshot_path(&path) {
             Ok(snapshots) => json!({
                 "status": "ok",
@@ -564,7 +577,10 @@ pub mod mcp_tools {
         }
     }
 
-    pub fn handle_watchdog_events(watchdog: &FilesystemWatchdog, limit: usize) -> serde_json::Value {
+    pub fn handle_watchdog_events(
+        watchdog: &FilesystemWatchdog,
+        limit: usize,
+    ) -> serde_json::Value {
         let events = watchdog.get_events(limit);
         json!({
             "status": "ok",
@@ -577,7 +593,10 @@ pub mod mcp_tools {
         })
     }
 
-    pub fn handle_watchdog_check_path(watchdog: &FilesystemWatchdog, path: String) -> serde_json::Value {
+    pub fn handle_watchdog_check_path(
+        watchdog: &FilesystemWatchdog,
+        path: String,
+    ) -> serde_json::Value {
         let (protected, critical) = watchdog.is_protected_path(&path);
         json!({
             "path": path,
@@ -609,11 +628,11 @@ mod tests {
     #[test]
     fn test_protected_path_detection() {
         let watchdog = FilesystemWatchdog::new(WatchdogConfig::default());
-        
+
         let (protected, critical) = watchdog.is_protected_path("/boot/vmlinuz");
         assert!(protected);
         assert!(critical.is_some());
-        
+
         let (protected, _) = watchdog.is_protected_path("/home/user/file.txt");
         assert!(!protected);
     }
@@ -622,7 +641,7 @@ mod tests {
     fn test_stats() {
         let watchdog = FilesystemWatchdog::new(WatchdogConfig::default());
         let stats = watchdog.stats();
-        
+
         assert!(stats["enabled"].as_bool().unwrap());
         assert!(stats["monitored_paths"].as_u64().unwrap() > 0);
     }

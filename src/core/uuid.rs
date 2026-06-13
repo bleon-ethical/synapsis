@@ -2,8 +2,7 @@
 
 use crate::core::security::SecureRng;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Uuid(pub [u8; 16]);
 
 impl Uuid {
@@ -36,4 +35,3 @@ impl Uuid {
         result
     }
 }
-

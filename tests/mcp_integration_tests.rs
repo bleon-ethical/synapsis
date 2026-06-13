@@ -4,10 +4,10 @@
 //! tool registration, resource access, and prompt handling.
 
 use serde_json::json;
-use synapsis::presentation::mcp::McpServer;
-use synapsis::infrastructure::database::Database;
-use synapsis::core::orchestrator::Orchestrator;
 use std::sync::Arc;
+use synapsis::core::orchestrator::Orchestrator;
+use synapsis::infrastructure::database::Database;
+use synapsis::presentation::mcp::McpServer;
 
 fn test_server() -> McpServer {
     let db = Arc::new(Database::new());
@@ -568,7 +568,9 @@ mod mcp_tests {
 
         let resp_json: serde_json::Value = serde_json::from_str(&response.unwrap()).unwrap();
         let error_msg = resp_json["error"]["message"].as_str().unwrap_or("");
-        let result_msg = resp_json["result"]["content"][0]["text"].as_str().unwrap_or("");
+        let result_msg = resp_json["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("");
         assert!(error_msg.contains("Unknown tool") || result_msg.contains("Unknown tool"));
     }
 

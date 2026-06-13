@@ -120,7 +120,10 @@ mod tests {
             guard.len()
         );
 
-        assert!(total >= 1 && total <= 3, "Deduplication should result in ~1-2 inserts (sync_id may vary)");
+        assert!(
+            total >= 1 && total <= 3,
+            "Deduplication should result in ~1-2 inserts (sync_id may vary)"
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════

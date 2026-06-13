@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 pub mod multi_agent;
 
+#[allow(dead_code)]
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
     _data_dir: PathBuf,
@@ -25,9 +26,7 @@ impl Database {
     pub fn new() -> Self {
         let encryption_key = std::env::var("SYNAPSIS_DB_KEY")
             .ok()
-            .and_then(|hex_key| {
-                hex::decode(hex_key).ok()
-            })
+            .and_then(|hex_key| hex::decode(hex_key).ok())
             .or_else(|| {
                 std::env::var("SYNAPSIS_DB_KEY_BASE64")
                     .ok()
@@ -44,10 +43,11 @@ impl Database {
         std::fs::create_dir_all(&data_dir).ok();
         let db_path = data_dir.join("synapsis.db");
         let conn = if let Some(key) = &encryption_key {
-            let mut conn = Connection::open(&db_path).unwrap();
+            let conn = Connection::open(&db_path).unwrap();
             // SQLCipher expects key as bytes; we'll use hex encoding
             let hex_key = hex::encode(key);
-            conn.execute_batch(&format!("PRAGMA key = 'x{}'", hex_key)).unwrap();
+            conn.execute_batch(&format!("PRAGMA key = 'x{}'", hex_key))
+                .unwrap();
             // Verify encryption is active
             conn.execute_batch("PRAGMA cipher_version").unwrap();
             conn
@@ -77,12 +77,15 @@ impl Database {
     }
 
     fn create_tables(&self, conn: &Connection) -> Result<()> {
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)").ok();
-        let version: i32 = conn.query_row(
-            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
+            .ok();
+        let version: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
 
         if version < 1 {
             conn.execute_batch("DROP TABLE IF EXISTS observations").ok();
@@ -193,7 +196,7 @@ impl Database {
                 created_at INTEGER NOT NULL,
                 checksum TEXT
             );
-            "
+            ",
         )?;
         Ok(())
     }
@@ -257,12 +260,22 @@ impl Database {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
-    pub fn acquire_lock(&self, session_id: &str, lock_key: &str, _resource_type: &str, _resource_id: Option<&str>, ttl_secs: i64) -> Result<bool> {
+    pub fn acquire_lock(
+        &self,
+        session_id: &str,
+        lock_key: &str,
+        _resource_type: &str,
+        _resource_id: Option<&str>,
+        ttl_secs: i64,
+    ) -> Result<bool> {
         let conn = self.get_conn();
         let now = Timestamp::now().0;
         let expires = now + ttl_secs;
 
-        conn.execute("DELETE FROM active_locks WHERE expires_at < ?", params![now])?;
+        conn.execute(
+            "DELETE FROM active_locks WHERE expires_at < ?",
+            params![now],
+        )?;
 
         let result = conn.execute(
             "INSERT OR REPLACE INTO active_locks (lock_key, agent_session_id, acquired_at, expires_at) VALUES (?, ?, ?, ?)",
@@ -273,11 +286,20 @@ impl Database {
 
     pub fn release_lock(&self, lock_key: &str) -> Result<()> {
         let conn = self.get_conn();
-        conn.execute("DELETE FROM active_locks WHERE lock_key = ?", params![lock_key])?;
+        conn.execute(
+            "DELETE FROM active_locks WHERE lock_key = ?",
+            params![lock_key],
+        )?;
         Ok(())
     }
 
-    pub fn create_task(&self, project_key: &str, task_type: &str, payload: &str, priority: i32) -> Result<String> {
+    pub fn create_task(
+        &self,
+        project_key: &str,
+        task_type: &str,
+        payload: &str,
+        priority: i32,
+    ) -> Result<String> {
         let conn = self.get_conn();
         let task_id = Uuid::new_v4().to_hex_string();
         let now = Timestamp::now().0;
@@ -289,7 +311,14 @@ impl Database {
         Ok(task_id)
     }
 
-    pub fn create_chunk(&self, project_key: &str, title: &str, content: &str, _parent_id: Option<&str>, level: i32) -> Result<String> {
+    pub fn create_chunk(
+        &self,
+        project_key: &str,
+        title: &str,
+        content: &str,
+        _parent_id: Option<&str>,
+        level: i32,
+    ) -> Result<String> {
         let conn = self.get_conn();
         let chunk_id = Uuid::new_v4().to_hex_string();
         let now = Timestamp::now().0;
@@ -322,10 +351,19 @@ impl Database {
         }
     }
 
-    pub fn complete_task(&self, task_id: &str, result: Option<&str>, error: Option<&str>) -> Result<()> {
+    pub fn complete_task(
+        &self,
+        task_id: &str,
+        result: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
         let conn = self.get_conn();
         let now = Timestamp::now().0;
-        let status = if error.is_some() { "failed" } else { "completed" };
+        let status = if error.is_some() {
+            "failed"
+        } else {
+            "completed"
+        };
 
         conn.execute(
             "UPDATE task_queue SET status = ?, completed_at = ?, result = ?, error = ? WHERE task_id = ?",
@@ -345,10 +383,30 @@ impl Database {
 
     pub fn get_stats(&self) -> Result<serde_json::Value> {
         let conn = self.get_conn();
-        let obs: i64 = conn.query_row("SELECT COUNT(*) FROM observations WHERE deleted_at IS NULL", [], |r| r.get(0)).unwrap_or(0);
-        let agents: i64 = conn.query_row("SELECT COUNT(*) FROM agent_sessions", [], |r| r.get(0)).unwrap_or(0);
-        let active: i64 = conn.query_row("SELECT COUNT(*) FROM agent_sessions WHERE is_active = 1", [], |r| r.get(0)).unwrap_or(0);
-        let tasks: i64 = conn.query_row("SELECT COUNT(*) FROM task_queue WHERE status = 'pending'", [], |r| r.get(0)).unwrap_or(0);
+        let obs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM observations WHERE deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let agents: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_sessions", [], |r| r.get(0))
+            .unwrap_or(0);
+        let active: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM agent_sessions WHERE is_active = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let tasks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_queue WHERE status = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
 
         Ok(serde_json::json!({
             "observations": obs,
@@ -360,11 +418,13 @@ impl Database {
 
     pub fn get_global_context(&self, project_key: &str) -> Result<Option<String>> {
         let conn = self.get_conn();
-        let ctx = conn.query_row(
-            "SELECT context_data FROM global_context WHERE project_key = ?",
-            params![project_key],
-            |row| row.get::<_, String>(0),
-        ).optional()?;
+        let ctx = conn
+            .query_row(
+                "SELECT context_data FROM global_context WHERE project_key = ?",
+                params![project_key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
         Ok(ctx)
     }
 
@@ -414,7 +474,11 @@ impl Database {
         Ok(imported)
     }
 
-    pub fn get_chunks_by_project(&self, project_key: &str, level: Option<i32>) -> Result<Vec<serde_json::Value>> {
+    pub fn get_chunks_by_project(
+        &self,
+        project_key: &str,
+        level: Option<i32>,
+    ) -> Result<Vec<serde_json::Value>> {
         let conn = self.get_conn();
         if let Some(l) = level {
             let mut stmt = conn.prepare("SELECT chunk_id, title, content, level FROM chunks WHERE project_key = ? AND level = ? AND is_active = 1")?;
@@ -443,7 +507,12 @@ impl Database {
         }
     }
 
-    pub fn search_fts(&self, query: &str, project: Option<&str>, limit: i32) -> Result<Vec<serde_json::Value>> {
+    pub fn search_fts(
+        &self,
+        query: &str,
+        project: Option<&str>,
+        limit: i32,
+    ) -> Result<Vec<serde_json::Value>> {
         let conn = self.get_conn();
         let search_term = format!("%{}%", query);
 
@@ -516,15 +585,19 @@ impl Database {
 impl StoragePort for Database {
     fn init(&self) -> Result<()> {
         let conn = self.get_conn();
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL)").ok();
-        let version: i32 = conn.query_row(
-            "SELECT COALESCE(MAX(version), 0) FROM _schema_version",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER NOT NULL)")
+            .ok();
+        let version: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM _schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         if version < 1 {
             conn.execute_batch("DROP TABLE IF EXISTS observations").ok();
-            conn.execute("INSERT INTO _schema_version (version) VALUES (1)", []).ok();
+            conn.execute("INSERT INTO _schema_version (version) VALUES (1)", [])
+                .ok();
         }
         self.create_tables(&conn)?;
         Ok(())
@@ -544,12 +617,33 @@ impl StoragePort for Database {
                 project: row.get(3)?,
                 observation_type: {
                     let v: u8 = row.get(4)?;
-                    match v { 1 => ObservationType::ToolUse, 2 => ObservationType::FileChange, 3 => ObservationType::Command, 4 => ObservationType::FileRead, 5 => ObservationType::Search, 6 => ObservationType::Decision, 7 => ObservationType::Architecture, 8 => ObservationType::Bugfix, 9 => ObservationType::Pattern, 10 => ObservationType::Config, 11 => ObservationType::Discovery, 12 => ObservationType::Learning, _ => ObservationType::Manual }
+                    match v {
+                        1 => ObservationType::ToolUse,
+                        2 => ObservationType::FileChange,
+                        3 => ObservationType::Command,
+                        4 => ObservationType::FileRead,
+                        5 => ObservationType::Search,
+                        6 => ObservationType::Decision,
+                        7 => ObservationType::Architecture,
+                        8 => ObservationType::Bugfix,
+                        9 => ObservationType::Pattern,
+                        10 => ObservationType::Config,
+                        11 => ObservationType::Discovery,
+                        12 => ObservationType::Learning,
+                        _ => ObservationType::Manual,
+                    }
                 },
                 title: row.get(5)?,
                 content: row.get(6)?,
                 tool_name: row.get(7)?,
-                scope: { let v: u8 = row.get(8)?; if v == 1 { Scope::Personal } else { Scope::Project } },
+                scope: {
+                    let v: u8 = row.get(8)?;
+                    if v == 1 {
+                        Scope::Personal
+                    } else {
+                        Scope::Project
+                    }
+                },
                 topic_key: row.get(9)?,
                 content_hash: ContentHash::zero(),
                 revision_count: row.get(11)?,
@@ -559,7 +653,16 @@ impl StoragePort for Database {
                 updated_at: Timestamp(row.get(15)?),
                 deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
                 integrity_hash: row.get(17)?,
-                classification: { let v: u8 = row.get(18)?; match v { 1 => Classification::Internal, 2 => Classification::Confidential, 3 => Classification::Secret, 4 => Classification::TopSecret, _ => Classification::Public } },
+                classification: {
+                    let v: u8 = row.get(18)?;
+                    match v {
+                        1 => Classification::Internal,
+                        2 => Classification::Confidential,
+                        3 => Classification::Secret,
+                        4 => Classification::TopSecret,
+                        _ => Classification::Public,
+                    }
+                },
             })
         })?;
         Ok(rows.next().transpose()?)
@@ -582,11 +685,35 @@ impl StoragePort for Database {
                 sync_id: SyncId(row.get::<_, String>(1)?),
                 session_id: SessionId::new(row.get::<_, String>(2)?),
                 project: row.get(3)?,
-                observation_type: { let v: u8 = row.get(4)?; match v { 1 => ObservationType::ToolUse, 2 => ObservationType::FileChange, 3 => ObservationType::Command, 4 => ObservationType::FileRead, 5 => ObservationType::Search, 6 => ObservationType::Decision, 7 => ObservationType::Architecture, 8 => ObservationType::Bugfix, 9 => ObservationType::Pattern, 10 => ObservationType::Config, 11 => ObservationType::Discovery, 12 => ObservationType::Learning, _ => ObservationType::Manual } },
+                observation_type: {
+                    let v: u8 = row.get(4)?;
+                    match v {
+                        1 => ObservationType::ToolUse,
+                        2 => ObservationType::FileChange,
+                        3 => ObservationType::Command,
+                        4 => ObservationType::FileRead,
+                        5 => ObservationType::Search,
+                        6 => ObservationType::Decision,
+                        7 => ObservationType::Architecture,
+                        8 => ObservationType::Bugfix,
+                        9 => ObservationType::Pattern,
+                        10 => ObservationType::Config,
+                        11 => ObservationType::Discovery,
+                        12 => ObservationType::Learning,
+                        _ => ObservationType::Manual,
+                    }
+                },
                 title: row.get(5)?,
                 content: row.get(6)?,
                 tool_name: row.get(7)?,
-                scope: { let v: u8 = row.get(8)?; if v == 1 { Scope::Personal } else { Scope::Project } },
+                scope: {
+                    let v: u8 = row.get(8)?;
+                    if v == 1 {
+                        Scope::Personal
+                    } else {
+                        Scope::Project
+                    }
+                },
                 topic_key: row.get(9)?,
                 content_hash: ContentHash::zero(),
                 revision_count: row.get(11)?,
@@ -596,11 +723,23 @@ impl StoragePort for Database {
                 updated_at: Timestamp(row.get(15)?),
                 deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
                 integrity_hash: row.get(17)?,
-                classification: { let v: u8 = row.get(18)?; match v { 1 => Classification::Internal, 2 => Classification::Confidential, 3 => Classification::Secret, 4 => Classification::TopSecret, _ => Classification::Public } },
+                classification: {
+                    let v: u8 = row.get(18)?;
+                    match v {
+                        1 => Classification::Internal,
+                        2 => Classification::Confidential,
+                        3 => Classification::Secret,
+                        4 => Classification::TopSecret,
+                        _ => Classification::Public,
+                    }
+                },
             })
         })?;
         let observations: Vec<Observation> = rows.filter_map(|r| r.ok()).collect();
-        Ok(observations.into_iter().map(|o| SearchResult::new(o, 0.0)).collect())
+        Ok(observations
+            .into_iter()
+            .map(|o| SearchResult::new(o, 0.0))
+            .collect())
     }
 
     fn get_timeline(&self, limit: i32) -> Result<Vec<TimelineEntry>> {
@@ -615,11 +754,35 @@ impl StoragePort for Database {
                 sync_id: SyncId(row.get::<_, String>(1)?),
                 session_id: SessionId::new(row.get::<_, String>(2)?),
                 project: row.get(3)?,
-                observation_type: { let v: u8 = row.get(4)?; match v { 1 => ObservationType::ToolUse, 2 => ObservationType::FileChange, 3 => ObservationType::Command, 4 => ObservationType::FileRead, 5 => ObservationType::Search, 6 => ObservationType::Decision, 7 => ObservationType::Architecture, 8 => ObservationType::Bugfix, 9 => ObservationType::Pattern, 10 => ObservationType::Config, 11 => ObservationType::Discovery, 12 => ObservationType::Learning, _ => ObservationType::Manual } },
+                observation_type: {
+                    let v: u8 = row.get(4)?;
+                    match v {
+                        1 => ObservationType::ToolUse,
+                        2 => ObservationType::FileChange,
+                        3 => ObservationType::Command,
+                        4 => ObservationType::FileRead,
+                        5 => ObservationType::Search,
+                        6 => ObservationType::Decision,
+                        7 => ObservationType::Architecture,
+                        8 => ObservationType::Bugfix,
+                        9 => ObservationType::Pattern,
+                        10 => ObservationType::Config,
+                        11 => ObservationType::Discovery,
+                        12 => ObservationType::Learning,
+                        _ => ObservationType::Manual,
+                    }
+                },
                 title: row.get(5)?,
                 content: row.get(6)?,
                 tool_name: row.get(7)?,
-                scope: { let v: u8 = row.get(8)?; if v == 1 { Scope::Personal } else { Scope::Project } },
+                scope: {
+                    let v: u8 = row.get(8)?;
+                    if v == 1 {
+                        Scope::Personal
+                    } else {
+                        Scope::Project
+                    }
+                },
                 topic_key: row.get(9)?,
                 content_hash: ContentHash::zero(),
                 revision_count: row.get(11)?,
@@ -629,11 +792,26 @@ impl StoragePort for Database {
                 updated_at: Timestamp(row.get(15)?),
                 deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
                 integrity_hash: row.get(17)?,
-                classification: { let v: u8 = row.get(18)?; match v { 1 => Classification::Internal, 2 => Classification::Confidential, 3 => Classification::Secret, 4 => Classification::TopSecret, _ => Classification::Public } },
+                classification: {
+                    let v: u8 = row.get(18)?;
+                    match v {
+                        1 => Classification::Internal,
+                        2 => Classification::Confidential,
+                        3 => Classification::Secret,
+                        4 => Classification::TopSecret,
+                        _ => Classification::Public,
+                    }
+                },
             })
         })?;
         let observations: Vec<Observation> = rows.filter_map(|r| r.ok()).collect();
-        Ok(observations.into_iter().map(|o| TimelineEntry { observation: o, is_focus: false }).collect())
+        Ok(observations
+            .into_iter()
+            .map(|o| TimelineEntry {
+                observation: o,
+                is_focus: false,
+            })
+            .collect())
     }
 }
 
@@ -692,8 +870,14 @@ impl MemoryPort for Database {
         };
 
         let memories: Vec<Memory> = match session_id {
-            Some(sid) => stmt.query_map(params![agent_id, sid], mapping)?.filter_map(|r| r.ok()).collect(),
-            None => stmt.query_map(params![agent_id], mapping)?.filter_map(|r| r.ok()).collect(),
+            Some(sid) => stmt
+                .query_map(params![agent_id, sid], mapping)?
+                .filter_map(|r| r.ok())
+                .collect(),
+            None => stmt
+                .query_map(params![agent_id], mapping)?
+                .filter_map(|r| r.ok())
+                .collect(),
         };
 
         Ok(memories)
@@ -702,12 +886,13 @@ impl MemoryPort for Database {
     fn clear_memories(&self, agent_id: &str, session_id: Option<&str>) -> Result<()> {
         let conn = self.get_conn();
         if let Some(sid) = session_id {
-            conn.execute("DELETE FROM memories WHERE agent_id = ? AND session_id = ?", params![agent_id, sid])?;
+            conn.execute(
+                "DELETE FROM memories WHERE agent_id = ? AND session_id = ?",
+                params![agent_id, sid],
+            )?;
         } else {
             conn.execute("DELETE FROM memories WHERE agent_id = ?", params![agent_id])?;
         }
         Ok(())
     }
 }
-
-

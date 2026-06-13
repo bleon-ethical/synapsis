@@ -244,7 +244,12 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub fn new(agent_id: String, session_id: Option<String>, role: String, content: String) -> Self {
+    pub fn new(
+        agent_id: String,
+        session_id: Option<String>,
+        role: String,
+        content: String,
+    ) -> Self {
         use crate::core::uuid::Uuid;
         Self {
             id: Uuid::new_v4().to_hex_string(),

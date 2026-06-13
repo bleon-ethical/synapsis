@@ -183,11 +183,13 @@ impl CompressedContext {
     }
 }
 
+#[allow(dead_code)]
 pub struct ContextCompressor {
     history: VecDeque<CompressionRecord>,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CompressionRecord {
     original_tokens: usize,
     compressed_tokens: usize,
@@ -279,6 +281,7 @@ pub struct ContextMonitor {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct UsageSnapshot {
     timestamp: i64,
     tokens: usize,

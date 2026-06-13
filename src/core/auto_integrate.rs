@@ -1,8 +1,6 @@
 //! Synapsis Auto-Integration - Proactive tool integration
 
-use crate::core::discovery::{
-    DiscoveredTool, DiscoveryScan, EnvironmentDiscovery, ToolType,
-};
+use crate::core::discovery::{DiscoveredTool, DiscoveryScan, EnvironmentDiscovery, ToolType};
 use crate::core::tool_registry::{ToolRegistryState, WorkerConfig};
 use crate::domain::types::Timestamp;
 use crate::domain::{ErrorKind, Result, SynapsisError};

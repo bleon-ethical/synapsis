@@ -9,8 +9,10 @@
 //! - Master key auto-generation
 //! - Key rotation support
 
-use aes_gcm::{Aes256Gcm, Key, KeyInit, aead::{Aead, Nonce, OsRng}};
-use aes_gcm::aead::generic_array::GenericArray;
+use aes_gcm::{
+    aead::{Aead, Nonce},
+    Aes256Gcm, Key, KeyInit,
+};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use getrandom::getrandom;
 use serde::{Deserialize, Serialize};
@@ -164,8 +166,9 @@ impl SecureVault {
 
     fn generate_master_key() -> Result<MasterKey, VaultError> {
         let mut key = vec![0u8; 32];
-        getrandom::getrandom(&mut key)
-            .map_err(|e| VaultError::EncryptionFailed(format!("random generation failed: {}", e)))?;
+        getrandom::getrandom(&mut key).map_err(|e| {
+            VaultError::EncryptionFailed(format!("random generation failed: {}", e))
+        })?;
 
         let key_id = BASE64.encode(&compute_hash(&key)[..8]);
 
@@ -313,10 +316,11 @@ impl SecureVault {
         }
         let data = std::fs::read_to_string(&path)?;
         let map: HashMap<String, String> = serde_json::from_str(&data)?;
-        let value = map.get(key)
+        let value = map
+            .get(key)
             .cloned()
             .ok_or_else(|| VaultError::StorageError(format!("missing secret: {key}")))?;
-        
+
         // Try to decode as base64
         match BASE64.decode(&value) {
             Ok(encrypted) => {
@@ -324,8 +328,9 @@ impl SecureVault {
                 match self.decrypt_data(&encrypted) {
                     Ok(decrypted) => {
                         // Successfully decrypted
-                        String::from_utf8(decrypted)
-                            .map_err(|e| VaultError::StorageError(format!("utf8 decode failed: {}", e)))
+                        String::from_utf8(decrypted).map_err(|e| {
+                            VaultError::StorageError(format!("utf8 decode failed: {}", e))
+                        })
                     }
                     Err(VaultError::DecryptionFailed) => {
                         // Decryption failed but is base64 - possibly corrupted or wrong key
@@ -360,7 +365,8 @@ impl SecureVault {
         let mut nonce = [0u8; 12];
         getrandom(&mut nonce).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
         let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce);
-        let ciphertext = cipher.encrypt(nonce, plaintext)
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext)
             .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
         let mut result = nonce.to_vec();
         result.extend(ciphertext);
@@ -379,7 +385,8 @@ impl SecureVault {
         let key = Key::<Aes256Gcm>::from_slice(&mk.key);
         let cipher = Aes256Gcm::new(key);
         let nonce = Nonce::<Aes256Gcm>::from_slice(&ciphertext[..12]);
-        let plaintext = cipher.decrypt(nonce, &ciphertext[12..])
+        let plaintext = cipher
+            .decrypt(nonce, &ciphertext[12..])
             .map_err(|_| VaultError::DecryptionFailed)?;
         Ok(plaintext)
     }
@@ -398,9 +405,10 @@ impl SecureVault {
 
     fn generate_session_key() -> Result<SessionKey, VaultError> {
         let mut encryption_key = vec![0u8; 32];
-        getrandom::getrandom(&mut encryption_key)
-            .map_err(|e| VaultError::EncryptionFailed(format!("random generation failed: {}", e)))?;
-        
+        getrandom::getrandom(&mut encryption_key).map_err(|e| {
+            VaultError::EncryptionFailed(format!("random generation failed: {}", e))
+        })?;
+
         let mac_key = derive_mac_key(&encryption_key);
         let now = current_timestamp();
 
@@ -504,6 +512,7 @@ fn compute_hash(data: &[u8]) -> Vec<u8> {
     result
 }
 
+#[allow(dead_code)]
 fn compute_hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut inner_pad = [0x36u8; 64];
     let mut outer_pad = [0x5cu8; 64];
@@ -528,9 +537,10 @@ fn derive_mac_key(encryption_key: &[u8]) -> Vec<u8> {
     compute_hash(&mac_key)
 }
 
+#[allow(dead_code)]
 fn generate_nonce(len: usize) -> Vec<u8> {
     let mut nonce = vec![0u8; len];
-    if let Err(e) = getrandom::getrandom(&mut nonce) {
+    if let Err(_e) = getrandom::getrandom(&mut nonce) {
         // Fallback to weak randomness if getrandom fails (should not happen)
         use std::time::{SystemTime, UNIX_EPOCH};
         let seed = SystemTime::now()

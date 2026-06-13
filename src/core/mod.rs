@@ -11,8 +11,9 @@ pub mod discovery_net;
 pub mod orchestrator;
 pub mod passive_capture;
 pub mod pqc;
-pub mod recycle;
 pub mod rate_limiter;
+pub mod recycle;
+pub mod resource_manager;
 pub mod retry;
 pub mod security;
 pub mod sync;
@@ -22,19 +23,21 @@ pub mod uuid;
 pub mod vault;
 pub mod watchdog;
 pub mod worker;
-pub mod resource_manager;
 
 pub use agent::*;
-pub use auto_integrate::*;
 pub use auth::*;
+pub use auto_integrate::*;
 pub use concurrency::*;
 pub use concurrency_advanced::*;
 pub use discovery::*;
-pub use orchestrator::{Agent, AgentStatus, LegacyFile, MessageType, Orchestrator, OrchestratorMessage, ReviewStatus, Task as OrchestratorTask, TaskStatus as OrchestratorTaskStatus};
+pub use orchestrator::{
+    Agent, AgentStatus, LegacyFile, MessageType, Orchestrator, OrchestratorMessage, ReviewStatus,
+    Task as OrchestratorTask, TaskStatus as OrchestratorTaskStatus,
+};
 pub use passive_capture::*;
 pub use pqc::*;
-pub use recycle::*;
 pub use rate_limiter::*;
+pub use recycle::*;
 pub use retry::*;
 pub use security::*;
 pub use sync::*;
@@ -42,13 +45,16 @@ pub use task_queue::*;
 pub use tool_registry::*;
 pub use uuid::*;
 pub use vault::*;
-pub use worker::{CodeWorker, FileWorker, GitWorker, OpenCodeConnector, QwenConnector, SearchWorker, ShellWorker, Task as WorkerTask, TaskStatus as WorkerTaskStatus, WorkerAgent, WorkerRegistry};
+pub use worker::{
+    CodeWorker, FileWorker, GitWorker, OpenCodeConnector, QwenConnector, SearchWorker, ShellWorker,
+    Task as WorkerTask, TaskStatus as WorkerTaskStatus, WorkerAgent, WorkerRegistry,
+};
+pub mod agent_registry_ext;
+pub mod audit_log;
+pub mod chunk_query;
+pub mod providers;
 pub mod session_id;
+pub mod session_manager;
 pub mod task_cleanup;
 pub mod terminal_writer;
-pub mod session_manager;
-pub mod audit_log;
 pub mod timeline_manager;
-pub mod chunk_query;
-pub mod agent_registry_ext;
-pub mod providers;

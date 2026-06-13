@@ -474,8 +474,6 @@ mod hmac_sha1 {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

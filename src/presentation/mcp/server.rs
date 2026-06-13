@@ -5,7 +5,7 @@ use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 
 use crate::core::antibrick::{AntiBrickConfig, AntiBrickEngine};
-use crate::core::orchestrator::{AgentStatus, Orchestrator};
+use crate::core::orchestrator::Orchestrator;
 use crate::core::watchdog::FilesystemWatchdog;
 use crate::domain::*;
 use crate::infrastructure::agents::{Agent, AgentRegistry, AgentRole};
@@ -85,12 +85,10 @@ impl McpServer {
     pub fn handle_message(&self, message: &str) -> Option<String> {
         let request: Value = match serde_json::from_str(message) {
             Ok(v) => v,
-            Err(_) => {
-                return Some(
-                    json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Invalid JSON"}})
-                        .to_string(),
-                )
-            }
+            Err(_) => return Some(
+                json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Invalid JSON"}})
+                    .to_string(),
+            ),
         };
 
         let is_notif = request.get("id").is_none_or(|v| v.is_null());
@@ -151,7 +149,11 @@ impl McpServer {
                 let uri = request["params"]["uri"].as_str().unwrap_or("");
                 let stats = self.db.stats().unwrap_or(json!({}));
                 let default_zero = json!(0);
-                let text = format!("Synapsis Memory Server v{}\nStats: {} observations", env!("CARGO_PKG_VERSION"), stats.get("observations").unwrap_or(&default_zero));
+                let text = format!(
+                    "Synapsis Memory Server v{}\nStats: {} observations",
+                    env!("CARGO_PKG_VERSION"),
+                    stats.get("observations").unwrap_or(&default_zero)
+                );
                 Ok(json!({
                     "jsonrpc": "2.0",
                     "id": id,
@@ -163,19 +165,17 @@ impl McpServer {
                 "id": id,
                 "result": { "prompts": [{"name": "memory_context"}] }
             })),
-            "prompts/get" => {
-                Ok(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "description": "Current Synapsis memory context",
-                        "messages": [{
-                            "role": "user",
-                            "content": { "type": "text", "text": "Review Synapsis memory for relevant context." }
-                        }]
-                    }
-                }))
-            }
+            "prompts/get" => Ok(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "description": "Current Synapsis memory context",
+                    "messages": [{
+                        "role": "user",
+                        "content": { "type": "text", "text": "Review Synapsis memory for relevant context." }
+                    }]
+                }
+            })),
             _ => Ok(json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -190,15 +190,20 @@ impl McpServer {
             .unwrap()
             .as_secs() as i64;
         let mut sessions = self.sessions.write().unwrap();
-        sessions.insert(session_id.to_string(), SessionInfo {
-            agent_type: agent_type.to_string(),
-            project: project.to_string(),
-            last_seen: now,
-        });
+        sessions.insert(
+            session_id.to_string(),
+            SessionInfo {
+                agent_type: agent_type.to_string(),
+                project: project.to_string(),
+                last_seen: now,
+            },
+        );
     }
 
     pub fn send_message(&self, from: &str, to: &str, content: &str) -> i64 {
-        let id = self.next_msg_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = self
+            .next_msg_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -228,7 +233,8 @@ impl McpServer {
             .unwrap()
             .as_secs() as i64;
         let sessions = self.sessions.read().unwrap();
-        sessions.iter()
+        sessions
+            .iter()
             .filter(|(_, info)| now - info.last_seen < 300)
             .map(|(id, info)| {
                 json!({
@@ -509,7 +515,9 @@ impl McpServer {
             "mem_save" | "memory_add" => self::tools::handle_mem_save(&self.db, id, args),
             "mem_search" | "memory_search" => self::tools::handle_mem_search(&self.db, id, args),
             "mem_context" => self::tools::handle_mem_context(&self.db, id, args),
-            "mem_timeline" | "memory_timeline" => self::tools::handle_mem_timeline(&self.db, id, args),
+            "mem_timeline" | "memory_timeline" => {
+                self::tools::handle_mem_timeline(&self.db, id, args)
+            }
             "mem_stats" | "memory_stats" => self::tools::handle_mem_stats(&self.db, id),
             "mem_delete" => self::tools::handle_mem_delete(&self.db, id, args),
             "ghost_audit" => self::tools::handle_ghost_audit(&self.orchestrator, id, args),
@@ -522,7 +530,9 @@ impl McpServer {
             "watchdog_verify" => self::tools::handle_watchdog_verify(&self.watchdog, id),
             "watchdog_snapshot" => self::tools::handle_watchdog_snapshot(&self.watchdog, id, args),
             "watchdog_events" => self::tools::handle_watchdog_events(&self.watchdog, id, args),
-            "watchdog_check_path" => self::tools::handle_watchdog_check_path(&self.watchdog, id, args),
+            "watchdog_check_path" => {
+                self::tools::handle_watchdog_check_path(&self.watchdog, id, args)
+            }
             "skill_register" => self::tools::handle_skill_register(&self.skills, id, args),
             "skill_list" => self::tools::handle_skill_list(&self.skills, id),
             "agent_register" => self::tools::handle_agent_register(&self.agents, id, args),
@@ -551,12 +561,18 @@ mod tools {
 
         let mut obs = Observation::new(
             SessionId::new(session_id),
-            obs_type_str.parse::<ObservationType>().unwrap_or(ObservationType::Manual),
+            obs_type_str
+                .parse::<ObservationType>()
+                .unwrap_or(ObservationType::Manual),
             title.to_string(),
             content.to_string(),
         );
         obs.project = project;
-        obs.scope = if scope_str == "personal" { Scope::Personal } else { Scope::Project };
+        obs.scope = if scope_str == "personal" {
+            Scope::Personal
+        } else {
+            Scope::Project
+        };
 
         match db.save_observation(&obs) {
             Ok(id_val) => Ok(json!({
@@ -590,7 +606,12 @@ mod tools {
             for (i, r) in results.iter().enumerate() {
                 let t = r["title"].as_str().unwrap_or("");
                 let c = r["content"].as_str().unwrap_or("");
-                lines.push(format!("\n{}. **{}**\n   {}", i + 1, t, &c[..c.len().min(200)]));
+                lines.push(format!(
+                    "\n{}. **{}**\n   {}",
+                    i + 1,
+                    t,
+                    &c[..c.len().min(200)]
+                ));
             }
             lines.join("\n")
         };
@@ -605,10 +626,12 @@ mod tools {
     }
 
     pub fn handle_mem_context(db: &Database, id: &Value, args: &Value) -> Result<Value> {
-        let limit = args["limit"].as_i64().unwrap_or(5) as i32;
+        let _limit = args["limit"].as_i64().unwrap_or(5) as i32;
         let project = args["project"].as_str();
 
-        let results = db.get_chunks_by_project(project.unwrap_or("default"), None).unwrap_or_default();
+        let results = db
+            .get_chunks_by_project(project.unwrap_or("default"), None)
+            .unwrap_or_default();
         let total = db.stats().unwrap_or_default();
         let default_zero = json!(0);
         let obs = total.get("observations").unwrap_or(&default_zero);
@@ -671,7 +694,7 @@ mod tools {
         }))
     }
 
-    pub fn handle_mem_delete(db: &Database, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_mem_delete(_db: &Database, id: &Value, args: &Value) -> Result<Value> {
         let _obs_id = args["id"].as_i64().unwrap_or(0);
         Ok(json!({
             "jsonrpc": "2.0",
@@ -682,7 +705,11 @@ mod tools {
         }))
     }
 
-    pub fn handle_ghost_audit(orchestrator: &Orchestrator, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_ghost_audit(
+        orchestrator: &Orchestrator,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let path = args["path"].as_str().unwrap_or(".");
         let task_id = orchestrator.create_task(
             &format!("External audit request for {}", path),
@@ -731,13 +758,23 @@ mod tools {
         }))
     }
 
-    pub fn handle_antibrick_scan(engine: &AntiBrickEngine, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_antibrick_scan(
+        engine: &AntiBrickEngine,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let command = args["command"].as_str().unwrap_or("");
         let args_vec: Vec<String> = args["args"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(String::from).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default();
-        let result = crate::core::antibrick::mcp_tools::handle_antibrick_scan(engine, command, args_vec);
+        let result =
+            crate::core::antibrick::mcp_tools::handle_antibrick_scan(engine, command, args_vec);
         Ok(json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -754,7 +791,11 @@ mod tools {
         }))
     }
 
-    pub fn handle_antibrick_enable(engine: &AntiBrickEngine, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_antibrick_enable(
+        engine: &AntiBrickEngine,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let enable = args["enable"].as_bool().unwrap_or(true);
         let result = crate::core::antibrick::mcp_tools::handle_antibrick_enable(engine, enable);
         Ok(json!({
@@ -782,7 +823,11 @@ mod tools {
         }))
     }
 
-    pub fn handle_watchdog_snapshot(watchdog: &FilesystemWatchdog, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_watchdog_snapshot(
+        watchdog: &FilesystemWatchdog,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let path = args["path"].as_str().unwrap_or("/").to_string();
         let result = crate::core::watchdog::mcp_tools::handle_watchdog_snapshot(watchdog, path);
         Ok(json!({
@@ -792,7 +837,11 @@ mod tools {
         }))
     }
 
-    pub fn handle_watchdog_events(watchdog: &FilesystemWatchdog, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_watchdog_events(
+        watchdog: &FilesystemWatchdog,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let limit = args["limit"].as_u64().unwrap_or(20) as usize;
         let result = crate::core::watchdog::mcp_tools::handle_watchdog_events(watchdog, limit);
         Ok(json!({
@@ -802,7 +851,11 @@ mod tools {
         }))
     }
 
-    pub fn handle_watchdog_check_path(watchdog: &FilesystemWatchdog, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_watchdog_check_path(
+        watchdog: &FilesystemWatchdog,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let path = args["path"].as_str().unwrap_or("/").to_string();
         let result = crate::core::watchdog::mcp_tools::handle_watchdog_check_path(watchdog, path);
         Ok(json!({
@@ -812,7 +865,11 @@ mod tools {
         }))
     }
 
-    pub fn handle_skill_register(skills: &SkillRegistry, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_skill_register(
+        skills: &SkillRegistry,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let name = args["name"].as_str().unwrap_or("").to_string();
         let description = args["description"].as_str().unwrap_or("").to_string();
         let category_str = args["category"].as_str().unwrap_or("custom");
@@ -823,7 +880,9 @@ mod tools {
                 "result": { "content": [{ "type": "text", "text": "Error: name is required" }] }
             }));
         }
-        let category = category_str.parse::<SkillCategory>().unwrap_or(SkillCategory::Custom);
+        let category = category_str
+            .parse::<SkillCategory>()
+            .unwrap_or(SkillCategory::Custom);
         let skill = Skill::new(name.clone(), description, category);
         let skill_id = skills.register(skill);
         Ok(json!({
@@ -851,7 +910,11 @@ mod tools {
         }))
     }
 
-    pub fn handle_agent_register(agents: &AgentRegistry, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_agent_register(
+        agents: &AgentRegistry,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let name = args["name"].as_str().unwrap_or("").to_string();
         let role_str = args["role"].as_str().unwrap_or("general");
         let description = args["description"].as_str().unwrap_or("").to_string();
@@ -891,10 +954,18 @@ mod tools {
         }))
     }
 
-    pub fn handle_task_create(orchestrator: &Orchestrator, id: &Value, args: &Value) -> Result<Value> {
+    pub fn handle_task_create(
+        orchestrator: &Orchestrator,
+        id: &Value,
+        args: &Value,
+    ) -> Result<Value> {
         let title = args["title"].as_str().unwrap_or("Untitled").to_string();
         let description = args["description"].as_str().unwrap_or("").to_string();
-        let payload = if description.is_empty() { title.clone() } else { description };
+        let payload = if description.is_empty() {
+            title.clone()
+        } else {
+            description
+        };
         let priority = args["priority"].as_i64().unwrap_or(1) as u8;
         let task_id = orchestrator.create_task(&payload, vec!["developer".into()], priority, None);
         let text = format!("Task created: {} (priority={})", task_id, priority);
@@ -906,7 +977,6 @@ mod tools {
     }
 
     pub fn handle_task_list(agents: &AgentRegistry, id: &Value) -> Result<Value> {
-        use crate::infrastructure::agents::TaskStatus as AgTaskStatus;
         let tasks = agents.get_tasks(None);
         let text = if tasks.is_empty() {
             "No tasks.".to_string()

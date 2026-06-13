@@ -226,7 +226,10 @@ impl ShellWorker {
         }
     }
 
-    pub fn with_antibrick(mut self, antibrick: Arc<crate::core::antibrick::AntiBrickEngine>) -> Self {
+    pub fn with_antibrick(
+        mut self,
+        antibrick: Arc<crate::core::antibrick::AntiBrickEngine>,
+    ) -> Self {
         self.antibrick = Some(antibrick);
         self
     }
@@ -236,7 +239,11 @@ impl ShellWorker {
         self
     }
 
-    async fn execute_shell_async(&self, command: &str, timeout_secs: u64) -> Result<String, String> {
+    async fn execute_shell_async(
+        &self,
+        command: &str,
+        timeout_secs: u64,
+    ) -> Result<String, String> {
         // Anti-brick check
         if let Some(ref engine) = self.antibrick {
             let pid = std::process::id(); // Use own PID for logging
@@ -273,7 +280,10 @@ impl ShellWorker {
                 let _ = reader.read_line(&mut output).await;
             }
 
-            let status = child.wait().await.map_err(|e| format!("Wait failed: {}", e))?;
+            let status = child
+                .wait()
+                .await
+                .map_err(|e| format!("Wait failed: {}", e))?;
 
             if let Some(mut stderr) = stderr {
                 let mut err_output = String::new();
@@ -340,7 +350,10 @@ impl WorkerAgent for ShellWorker {
             .and_then(|v| v.as_u64())
             .unwrap_or(300);
 
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let result = rt.block_on(self.execute_shell_async(command, timeout));
 
         let duration = start.elapsed().as_millis() as u64;
@@ -431,7 +444,10 @@ impl WorkerAgent for FileWorker {
                 }
 
                 match std::fs::read_to_string(path) {
-                    Ok(content) => Ok(TaskResult::success(content, start.elapsed().as_millis() as u64)),
+                    Ok(content) => Ok(TaskResult::success(
+                        content,
+                        start.elapsed().as_millis() as u64,
+                    )),
                     Err(e) => Err(TaskError::execution_failed(&e.to_string(), &task.id)),
                 }
             }
@@ -446,7 +462,9 @@ impl WorkerAgent for FileWorker {
                     .payload
                     .get("content")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| TaskError::new(0x0100, "Missing 'content' in payload", &task.id))?;
+                    .ok_or_else(|| {
+                        TaskError::new(0x0100, "Missing 'content' in payload", &task.id)
+                    })?;
 
                 let path_buf = PathBuf::from(path);
                 if !self.is_path_allowed(&path_buf) {
@@ -599,13 +617,13 @@ impl WorkerAgent for CodeWorker {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| TaskError::new(0x0100, "Missing 'code' in payload", &task.id))?;
 
-                let language = task
-                    .payload
-                    .get("language")
-                    .and_then(|v| v.as_str());
+                let language = task.payload.get("language").and_then(|v| v.as_str());
 
                 let analysis = self.analyze_code(code, language);
-                Ok(TaskResult::success(analysis, start.elapsed().as_millis() as u64))
+                Ok(TaskResult::success(
+                    analysis,
+                    start.elapsed().as_millis() as u64,
+                ))
             }
             TaskType::CodeRefactor => {
                 let code = task
@@ -621,7 +639,10 @@ impl WorkerAgent for CodeWorker {
                     .unwrap_or("fmt");
 
                 match self.refactor_code(code, style) {
-                    Ok(refactored) => Ok(TaskResult::success(refactored, start.elapsed().as_millis() as u64)),
+                    Ok(refactored) => Ok(TaskResult::success(
+                        refactored,
+                        start.elapsed().as_millis() as u64,
+                    )),
                     Err(e) => Ok(TaskResult::failure(e, start.elapsed().as_millis() as u64)),
                 }
             }
@@ -668,20 +689,31 @@ impl SearchWorker {
 
     async fn web_search_async(&self, query: &str) -> Result<String, String> {
         let output = TokioCommand::new("curl")
-            .args(["-s", "https://api.duckduckgo.com/", "-d", &format!("q={}", query), "-d", "format=json"])
+            .args([
+                "-s",
+                "https://api.duckduckgo.com/",
+                "-d",
+                &format!("q={}", query),
+                "-d",
+                "format=json",
+            ])
             .output()
             .await
             .map_err(|e| format!("curl failed: {}", e))?;
 
         if output.status.success() {
-            String::from_utf8(output.stdout)
-                .map_err(|e| format!("Invalid UTF-8: {}", e))
+            String::from_utf8(output.stdout).map_err(|e| format!("Invalid UTF-8: {}", e))
         } else {
             Err(format!("Search failed: {:?}", output.status))
         }
     }
 
-    fn code_search(&self, pattern: &str, path: &str, file_filter: Option<&str>) -> Result<String, String> {
+    fn code_search(
+        &self,
+        pattern: &str,
+        path: &str,
+        file_filter: Option<&str>,
+    ) -> Result<String, String> {
         let mut args = vec!["-r".to_string(), pattern.to_string(), path.to_string()];
 
         if let Some(filter) = file_filter {
@@ -695,8 +727,7 @@ impl SearchWorker {
             .map_err(|e| format!("ripgrep failed: {}", e))?;
 
         if output.status.success() {
-            String::from_utf8(output.stdout)
-                .map_err(|e| format!("Invalid UTF-8: {}", e))
+            String::from_utf8(output.stdout).map_err(|e| format!("Invalid UTF-8: {}", e))
         } else if output.status.code() == Some(1) {
             Ok(String::from("No matches found"))
         } else {
@@ -734,11 +765,19 @@ impl WorkerAgent for SearchWorker {
                     .payload
                     .get("query")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| TaskError::new(0x0100, "Missing 'query' in payload", &task.id))?;
+                    .ok_or_else(|| {
+                        TaskError::new(0x0100, "Missing 'query' in payload", &task.id)
+                    })?;
 
-                let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
                 match rt.block_on(self.web_search_async(query)) {
-                    Ok(results) => Ok(TaskResult::success(results, start.elapsed().as_millis() as u64)),
+                    Ok(results) => Ok(TaskResult::success(
+                        results,
+                        start.elapsed().as_millis() as u64,
+                    )),
                     Err(e) => Ok(TaskResult::failure(e, start.elapsed().as_millis() as u64)),
                 }
             }
@@ -747,7 +786,9 @@ impl WorkerAgent for SearchWorker {
                     .payload
                     .get("pattern")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| TaskError::new(0x0100, "Missing 'pattern' in payload", &task.id))?;
+                    .ok_or_else(|| {
+                        TaskError::new(0x0100, "Missing 'pattern' in payload", &task.id)
+                    })?;
 
                 let path = task
                     .payload
@@ -755,13 +796,13 @@ impl WorkerAgent for SearchWorker {
                     .and_then(|v| v.as_str())
                     .unwrap_or(".");
 
-                let file_filter = task
-                    .payload
-                    .get("file_filter")
-                    .and_then(|v| v.as_str());
+                let file_filter = task.payload.get("file_filter").and_then(|v| v.as_str());
 
                 match self.code_search(pattern, path, file_filter) {
-                    Ok(results) => Ok(TaskResult::success(results, start.elapsed().as_millis() as u64)),
+                    Ok(results) => Ok(TaskResult::success(
+                        results,
+                        start.elapsed().as_millis() as u64,
+                    )),
                     Err(e) => Ok(TaskResult::failure(e, start.elapsed().as_millis() as u64)),
                 }
             }
@@ -805,7 +846,11 @@ impl GitWorker {
         }
     }
 
-    async fn execute_git_async(&self, args: Vec<&str>, cwd: Option<PathBuf>) -> Result<String, String> {
+    async fn execute_git_async(
+        &self,
+        args: Vec<&str>,
+        cwd: Option<PathBuf>,
+    ) -> Result<String, String> {
         let mut cmd = TokioCommand::new("git");
         for arg in &args {
             cmd.arg(*arg);
@@ -820,8 +865,7 @@ impl GitWorker {
             .map_err(|e| format!("git command failed: {}", e))?;
 
         if output.status.success() {
-            String::from_utf8(output.stdout)
-                .map_err(|e| format!("Invalid UTF-8: {}", e))
+            String::from_utf8(output.stdout).map_err(|e| format!("Invalid UTF-8: {}", e))
         } else {
             Err(String::from_utf8_lossy(&output.stderr).to_string())
         }
@@ -869,9 +913,15 @@ impl WorkerAgent for GitWorker {
             return Err(TaskError::new(0x0100, "Empty git command", &task.id));
         }
 
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         match rt.block_on(self.execute_git_async(git_args, cwd)) {
-            Ok(output) => Ok(TaskResult::success(output, start.elapsed().as_millis() as u64)),
+            Ok(output) => Ok(TaskResult::success(
+                output,
+                start.elapsed().as_millis() as u64,
+            )),
             Err(e) => Ok(TaskResult::failure(e, start.elapsed().as_millis() as u64)),
         }
     }
@@ -930,7 +980,11 @@ impl OpenCodeConnector {
     pub fn with_default_config() -> Self {
         Self::new(ExternalAgentConfig {
             command: "opencode".to_string(),
-            args: vec!["--agent".to_string(), "--mode".to_string(), "pipe".to_string()],
+            args: vec![
+                "--agent".to_string(),
+                "--mode".to_string(),
+                "pipe".to_string(),
+            ],
             env: HashMap::new(),
             timeout_secs: 300,
         })
@@ -967,9 +1021,9 @@ impl ExternalAgentConnector for OpenCodeConnector {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        let child = cmd
-            .spawn()
-            .map_err(|e| TaskError::execution_failed(&format!("Failed to spawn opencode: {}", e), "opencode"))?;
+        let child = cmd.spawn().map_err(|e| {
+            TaskError::execution_failed(&format!("Failed to spawn opencode: {}", e), "opencode")
+        })?;
 
         self.process = Some(child);
         *self.running.lock().unwrap() = true;
@@ -981,16 +1035,24 @@ impl ExternalAgentConnector for OpenCodeConnector {
             return Err(TaskError::new(0x0201, "Agent not running", "opencode"));
         }
 
-        let task_json = serde_json::to_string(&task)
-            .map_err(|e| TaskError::new(0x0202, &format!("Failed to serialize task: {}", e), "opencode"))?;
+        let task_json = serde_json::to_string(&task).map_err(|e| {
+            TaskError::new(
+                0x0202,
+                &format!("Failed to serialize task: {}", e),
+                "opencode",
+            )
+        })?;
 
-        self.pending_tasks.lock().unwrap().insert(task.id.clone(), task);
+        self.pending_tasks
+            .lock()
+            .unwrap()
+            .insert(task.id.clone(), task);
 
         if let Some(ref mut child) = self.process {
             if let Some(ref mut stdin) = child.stdin {
-                stdin
-                    .write_all(task_json.as_bytes())
-                    .map_err(|e| TaskError::execution_failed(&format!("Failed to send task: {}", e), "opencode"))?;
+                stdin.write_all(task_json.as_bytes()).map_err(|e| {
+                    TaskError::execution_failed(&format!("Failed to send task: {}", e), "opencode")
+                })?;
             }
         }
 
@@ -1015,9 +1077,9 @@ impl ExternalAgentConnector for OpenCodeConnector {
 
     fn shutdown(&mut self) -> Result<(), TaskError> {
         if let Some(ref mut child) = self.process {
-            child
-                .kill()
-                .map_err(|e| TaskError::execution_failed(&format!("Failed to kill agent: {}", e), "opencode"))?;
+            child.kill().map_err(|e| {
+                TaskError::execution_failed(&format!("Failed to kill agent: {}", e), "opencode")
+            })?;
         }
 
         self.process = None;
@@ -1083,9 +1145,9 @@ impl ExternalAgentConnector for QwenConnector {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        let child = cmd
-            .spawn()
-            .map_err(|e| TaskError::execution_failed(&format!("Failed to spawn qwen: {}", e), "qwen"))?;
+        let child = cmd.spawn().map_err(|e| {
+            TaskError::execution_failed(&format!("Failed to spawn qwen: {}", e), "qwen")
+        })?;
 
         self.process = Some(child);
         *self.running.lock().unwrap() = true;
@@ -1097,16 +1159,20 @@ impl ExternalAgentConnector for QwenConnector {
             return Err(TaskError::new(0x0201, "Agent not running", "qwen"));
         }
 
-        let task_json = serde_json::to_string(&task)
-            .map_err(|e| TaskError::new(0x0202, &format!("Failed to serialize task: {}", e), "qwen"))?;
+        let task_json = serde_json::to_string(&task).map_err(|e| {
+            TaskError::new(0x0202, &format!("Failed to serialize task: {}", e), "qwen")
+        })?;
 
-        self.pending_tasks.lock().unwrap().insert(task.id.clone(), task);
+        self.pending_tasks
+            .lock()
+            .unwrap()
+            .insert(task.id.clone(), task);
 
         if let Some(ref mut child) = self.process {
             if let Some(ref mut stdin) = child.stdin {
-                stdin
-                    .write_all(task_json.as_bytes())
-                    .map_err(|e| TaskError::execution_failed(&format!("Failed to send task: {}", e), "qwen"))?;
+                stdin.write_all(task_json.as_bytes()).map_err(|e| {
+                    TaskError::execution_failed(&format!("Failed to send task: {}", e), "qwen")
+                })?;
             }
         }
 
@@ -1131,9 +1197,9 @@ impl ExternalAgentConnector for QwenConnector {
 
     fn shutdown(&mut self) -> Result<(), TaskError> {
         if let Some(ref mut child) = self.process {
-            child
-                .kill()
-                .map_err(|e| TaskError::execution_failed(&format!("Failed to kill agent: {}", e), "qwen"))?;
+            child.kill().map_err(|e| {
+                TaskError::execution_failed(&format!("Failed to kill agent: {}", e), "qwen")
+            })?;
         }
 
         self.process = None;
@@ -1199,9 +1265,9 @@ impl ExternalAgentConnector for ClaudeConnector {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        let child = cmd
-            .spawn()
-            .map_err(|e| TaskError::execution_failed(&format!("Failed to spawn claude: {}", e), "claude"))?;
+        let child = cmd.spawn().map_err(|e| {
+            TaskError::execution_failed(&format!("Failed to spawn claude: {}", e), "claude")
+        })?;
 
         self.process = Some(child);
         *self.running.lock().unwrap() = true;
@@ -1213,16 +1279,24 @@ impl ExternalAgentConnector for ClaudeConnector {
             return Err(TaskError::new(0x0201, "Agent not running", "claude"));
         }
 
-        let task_json = serde_json::to_string(&task)
-            .map_err(|e| TaskError::new(0x0202, &format!("Failed to serialize task: {}", e), "claude"))?;
+        let task_json = serde_json::to_string(&task).map_err(|e| {
+            TaskError::new(
+                0x0202,
+                &format!("Failed to serialize task: {}", e),
+                "claude",
+            )
+        })?;
 
-        self.pending_tasks.lock().unwrap().insert(task.id.clone(), task);
+        self.pending_tasks
+            .lock()
+            .unwrap()
+            .insert(task.id.clone(), task);
 
         if let Some(ref mut child) = self.process {
             if let Some(ref mut stdin) = child.stdin {
-                stdin
-                    .write_all(task_json.as_bytes())
-                    .map_err(|e| TaskError::execution_failed(&format!("Failed to send task: {}", e), "claude"))?;
+                stdin.write_all(task_json.as_bytes()).map_err(|e| {
+                    TaskError::execution_failed(&format!("Failed to send task: {}", e), "claude")
+                })?;
             }
         }
 
@@ -1247,9 +1321,9 @@ impl ExternalAgentConnector for ClaudeConnector {
 
     fn shutdown(&mut self) -> Result<(), TaskError> {
         if let Some(ref mut child) = self.process {
-            child
-                .kill()
-                .map_err(|e| TaskError::execution_failed(&format!("Failed to kill agent: {}", e), "claude"))?;
+            child.kill().map_err(|e| {
+                TaskError::execution_failed(&format!("Failed to kill agent: {}", e), "claude")
+            })?;
         }
 
         self.process = None;
@@ -1380,7 +1454,10 @@ impl WorkerOrchestrator {
         if let Some(worker) = self.find_worker_for_task(&task) {
             worker.execute_task(&task)
         } else {
-            Err(TaskError::unsupported_operation("No suitable worker found", &task.id))
+            Err(TaskError::unsupported_operation(
+                "No suitable worker found",
+                &task.id,
+            ))
         }
     }
 
@@ -1421,14 +1498,17 @@ impl SessionCleanupJob {
         }
     }
 
-    pub fn with_interval(db: Arc<crate::infrastructure::database::Database>, interval_secs: u64) -> Self {
+    pub fn with_interval(
+        db: Arc<crate::infrastructure::database::Database>,
+        interval_secs: u64,
+    ) -> Self {
         Self { db, interval_secs }
     }
 
     /// Start the cleanup job (runs in background)
     pub async fn start(&self) {
         let mut interval_timer = interval(std::time::Duration::from_secs(self.interval_secs));
-        
+
         eprintln!(
             "[SessionCleanup] Started - running every {} seconds",
             self.interval_secs
@@ -1445,7 +1525,8 @@ impl SessionCleanupJob {
         let threshold = (std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64) - 3600;
+            .as_secs() as i64)
+            - 3600;
 
         match self.db.cleanup_stale_sessions(threshold) {
             Ok(count) => {
@@ -1468,7 +1549,7 @@ impl SessionCleanupJob {
 /// Start cleanup job in background thread (non-async version)
 pub fn start_cleanup_job_background(db: Arc<crate::infrastructure::database::Database>) {
     let cleanup = SessionCleanupJob::new(db);
-    
+
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(cleanup.start());

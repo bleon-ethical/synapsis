@@ -5,9 +5,14 @@ use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone)]
 pub enum EventType {
-    TaskCreated, TaskCompleted, TaskFailed,
-    AgentJoined, AgentLeft,
-    ContextUpdated, LockAcquired, LockReleased,
+    TaskCreated,
+    TaskCompleted,
+    TaskFailed,
+    AgentJoined,
+    AgentLeft,
+    ContextUpdated,
+    LockAcquired,
+    LockReleased,
 }
 
 #[derive(Debug, Clone)]
@@ -46,16 +51,24 @@ impl EventBus {
     pub fn publish(&self, event: Event) {
         let mut history = self.event_history.write().unwrap();
         history.push(event.clone());
-        if history.len() > 1000 { history.remove(0); }
+        if history.len() > 1000 {
+            history.remove(0);
+        }
         eprintln!("[EventBus] Published: {:?}", event.event_type);
     }
 
     pub fn get_history(&self, since: i64) -> Vec<Event> {
         let history = self.event_history.read().unwrap();
-        history.iter().filter(|e| e.timestamp > since).cloned().collect()
+        history
+            .iter()
+            .filter(|e| e.timestamp > since)
+            .cloned()
+            .collect()
     }
 }
 
 impl Default for EventBus {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

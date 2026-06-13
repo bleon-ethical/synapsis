@@ -1,12 +1,12 @@
 //! Terminal Writer - Direct User Input Zone Communication
-//! 
+//!
 //! Allows agents to write coordination messages directly to
 //! user's terminal input zones when CLI/IDEs are waiting.
 
+use anyhow::Result;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use anyhow::Result;
 
 /// Terminal Writer for agent coordination
 pub struct TerminalWriter {
@@ -19,11 +19,11 @@ impl TerminalWriter {
             message_file: PathBuf::from("/tmp/synapsis-agent-messages.txt"),
         }
     }
-    
+
     /// Write coordination message to terminal input zone
     pub fn write_to_terminal(&self, message: &str, agent_id: &str) -> Result<()> {
         let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
-        
+
         let formatted = format!(
             "\n╔══════════════════════════════════════════════════════════╗\n\
              ║  📡 SYNAPSIS AGENT COORDINATION MESSAGE                  ║\n\
@@ -40,23 +40,23 @@ impl TerminalWriter {
             timestamp,
             Self::wrap_text(message, 52)
         );
-        
+
         // Append to message file
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.message_file)?;
-        
+
         file.write_all(formatted.as_bytes())?;
         file.flush()?;
-        
+
         // Also print to stdout for immediate visibility
         print!("{}", formatted);
         std::io::stdout().flush()?;
-        
+
         Ok(())
     }
-    
+
     /// Write coordination prompt (for user action)
     pub fn write_prompt(&self, _prompt: &str, agent_id: &str, action_required: &str) -> Result<()> {
         let message = format!(
@@ -64,12 +64,11 @@ impl TerminalWriter {
              Agent '{}' is waiting for:\n\
              {}\n\n\
              Please confirm when completed.",
-            agent_id,
-            action_required
+            agent_id, action_required
         );
-        
+
         self.write_to_terminal(&message, agent_id)?;
-        
+
         // Also write to prompt-specific file
         let prompt_file = PathBuf::from("/tmp/synapsis-agent-prompt.txt");
         let mut file = OpenOptions::new()
@@ -77,13 +76,13 @@ impl TerminalWriter {
             .write(true)
             .truncate(true)
             .open(&prompt_file)?;
-        
+
         file.write_all(format!("{}\n{}\n", agent_id, action_required).as_bytes())?;
         file.flush()?;
-        
+
         Ok(())
     }
-    
+
     /// Clear all agent messages
     pub fn clear_messages(&self) -> Result<()> {
         if self.message_file.exists() {
@@ -91,13 +90,13 @@ impl TerminalWriter {
         }
         Ok(())
     }
-    
+
     /// Get recent messages
     pub fn get_recent_messages(&self, lines: usize) -> Result<String> {
         if !self.message_file.exists() {
             return Ok("No messages".to_string());
         }
-        
+
         let content = std::fs::read_to_string(&self.message_file)?;
         let recent: String = content
             .lines()
@@ -108,10 +107,10 @@ impl TerminalWriter {
             .rev()
             .collect::<Vec<_>>()
             .join("\n");
-        
+
         Ok(recent)
     }
-    
+
     fn wrap_text(text: &str, width: usize) -> String {
         text.chars()
             .collect::<Vec<_>>()
@@ -131,14 +130,14 @@ impl Default for TerminalWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_terminal_writer() {
         let writer = TerminalWriter::new();
         let result = writer.write_to_terminal("Test message", "test-agent");
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_wrap_text() {
         let wrapped = TerminalWriter::wrap_text("Hello World", 5);

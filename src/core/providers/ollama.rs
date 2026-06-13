@@ -35,10 +35,8 @@ impl LlmProvider for OllamaProvider {
     }
 
     fn list_models(&self) -> Result<Vec<String>> {
-        let output = Command::new("ollama")
-            .arg("list")
-            .output()?;
-        
+        let output = Command::new("ollama").arg("list").output()?;
+
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let models: Vec<String> = stdout
@@ -51,25 +49,25 @@ impl LlmProvider for OllamaProvider {
             Err(crate::domain::SynapsisError::new(
                 crate::domain::ErrorKind::Internal,
                 500,
-                "Failed to list Ollama models"
+                "Failed to list Ollama models",
             ))
         }
     }
 
     fn generate(&self, prompt: &str, model: Option<&str>) -> Result<String> {
         let model = model.unwrap_or(&self.default_model);
-        
+
         let output = Command::new("ollama")
             .args(["run", model, prompt])
             .output()?;
-        
+
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
             Err(crate::domain::SynapsisError::new(
                 crate::domain::ErrorKind::Internal,
                 500,
-                format!("Ollama error: {}", String::from_utf8_lossy(&output.stderr))
+                format!("Ollama error: {}", String::from_utf8_lossy(&output.stderr)),
             ))
         }
     }

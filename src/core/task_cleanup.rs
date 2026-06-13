@@ -70,7 +70,7 @@ impl TaskCleanupManager {
         let mut stmt = conn.prepare_cached(
             "DELETE FROM task_queue
              WHERE status = 'pending'
-             AND created_at < ?1"
+             AND created_at < ?1",
         )?;
 
         let removed = stmt.execute([cutoff])?;
@@ -90,7 +90,7 @@ impl TaskCleanupManager {
         let mut stmt = conn.prepare_cached(
             "DELETE FROM task_queue
              WHERE status = 'failed'
-             AND updated_at < ?1"
+             AND updated_at < ?1",
         )?;
 
         let removed = stmt.execute([cutoff])?;
@@ -108,7 +108,7 @@ impl TaskCleanupManager {
 
         // Get all projects
         let mut projects_stmt = conn.prepare_cached(
-            "SELECT DISTINCT project_key FROM task_queue WHERE status = 'completed'"
+            "SELECT DISTINCT project_key FROM task_queue WHERE status = 'completed'",
         )?;
 
         let projects: Vec<String> = projects_stmt
@@ -130,10 +130,13 @@ impl TaskCleanupManager {
                      AND project_key = ?1
                      ORDER BY updated_at DESC
                      LIMIT ?2
-                 )"
+                 )",
             )?;
 
-            let removed = stmt.execute([&project, &(self.config.max_completed_per_project as i64).to_string()])?;
+            let removed = stmt.execute([
+                &project,
+                &(self.config.max_completed_per_project as i64).to_string(),
+            ])?;
             archived += removed;
         }
 

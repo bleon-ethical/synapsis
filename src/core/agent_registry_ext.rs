@@ -70,7 +70,9 @@ impl AgentRegistryExt {
             })
         })?;
 
-        Ok(agents.filter_map(|r: Result<AgentInfoExt, rusqlite::Error>| r.ok()).collect())
+        Ok(agents
+            .filter_map(|r: Result<AgentInfoExt, rusqlite::Error>| r.ok())
+            .collect())
     }
 
     /// agent_session_cleanup - Clean up stale agent sessions

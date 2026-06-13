@@ -59,29 +59,38 @@ impl TimelineManager {
             })
         })?;
 
-        Ok(entries.filter_map(|r: Result<TimelineEntry, rusqlite::Error>| r.ok()).collect())
+        Ok(entries
+            .filter_map(|r: Result<TimelineEntry, rusqlite::Error>| r.ok())
+            .collect())
     }
 
     /// Get timeline with focus and context
-    pub fn get_timeline_with_context(&self, focus_id: i64, before: i32, after: i32) -> Result<TimelineResult> {
+    pub fn get_timeline_with_context(
+        &self,
+        focus_id: i64,
+        before: i32,
+        after: i32,
+    ) -> Result<TimelineResult> {
         let conn = self.db.get_conn();
 
         // Get focus entry
-        let focus = conn.query_row(
-            "SELECT id, title, observation_type, created_at
+        let focus = conn
+            .query_row(
+                "SELECT id, title, observation_type, created_at
              FROM observations
              WHERE id = ?1 AND deleted_at IS NULL",
-            [focus_id],
-            |row: &rusqlite::Row| {
-                Ok(TimelineEntry {
-                    observation_id: row.get(0)?,
-                    title: row.get(1)?,
-                    observation_type: row.get(2)?,
-                    created_at: row.get(3)?,
-                    is_focus: true,
-                })
-            },
-        ).optional()?;
+                [focus_id],
+                |row: &rusqlite::Row| {
+                    Ok(TimelineEntry {
+                        observation_id: row.get(0)?,
+                        title: row.get(1)?,
+                        observation_type: row.get(2)?,
+                        created_at: row.get(3)?,
+                        is_focus: true,
+                    })
+                },
+            )
+            .optional()?;
 
         // Get entries before focus
         let before_entries = self.get_entries_before(&conn, focus_id, before)?;
@@ -104,7 +113,12 @@ impl TimelineManager {
         })
     }
 
-    fn get_entries_before(&self, conn: &rusqlite::Connection, focus_id: i64, limit: i32) -> Result<Vec<TimelineEntry>> {
+    fn get_entries_before(
+        &self,
+        conn: &rusqlite::Connection,
+        focus_id: i64,
+        limit: i32,
+    ) -> Result<Vec<TimelineEntry>> {
         let mut stmt = conn.prepare(
             "SELECT id, title, observation_type, created_at
              FROM observations
@@ -124,10 +138,17 @@ impl TimelineManager {
             })
         })?;
 
-        Ok(entries.filter_map(|r: Result<TimelineEntry, rusqlite::Error>| r.ok()).collect())
+        Ok(entries
+            .filter_map(|r: Result<TimelineEntry, rusqlite::Error>| r.ok())
+            .collect())
     }
 
-    fn get_entries_after(&self, conn: &rusqlite::Connection, focus_id: i64, limit: i32) -> Result<Vec<TimelineEntry>> {
+    fn get_entries_after(
+        &self,
+        conn: &rusqlite::Connection,
+        focus_id: i64,
+        limit: i32,
+    ) -> Result<Vec<TimelineEntry>> {
         let mut stmt = conn.prepare(
             "SELECT id, title, observation_type, created_at
              FROM observations
@@ -147,6 +168,8 @@ impl TimelineManager {
             })
         })?;
 
-        Ok(entries.filter_map(|r: Result<TimelineEntry, rusqlite::Error>| r.ok()).collect())
+        Ok(entries
+            .filter_map(|r: Result<TimelineEntry, rusqlite::Error>| r.ok())
+            .collect())
     }
 }

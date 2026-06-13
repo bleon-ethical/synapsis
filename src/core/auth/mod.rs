@@ -9,12 +9,12 @@
 //! - [`tpm`] - TPM and MFA integration
 //! - [`challenge`] - Challenge-response authentication
 
-pub mod permissions;
-pub mod classifier;
-pub mod tpm;
 pub mod challenge;
+pub mod classifier;
+pub mod permissions;
+pub mod tpm;
 
-pub use permissions::*;
-pub use classifier::*;
-pub use tpm::*;
 pub use challenge::*;
+pub use classifier::*;
+pub use permissions::*;
+pub use tpm::*;

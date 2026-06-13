@@ -13,7 +13,10 @@ impl SecureRng {
         if let Err(e) = getrandom(buf) {
             // Fallback: use OS RNG via rand crate if getrandom fails
             // This should be extremely rare (only in specific environments)
-            eprintln!("[SECURITY WARNING] getrandom failed: {}, using fallback RNG", e);
+            eprintln!(
+                "[SECURITY WARNING] getrandom failed: {}, using fallback RNG",
+                e
+            );
             use rand::RngCore;
             let mut rng = rand::rngs::OsRng;
             rng.fill_bytes(buf);

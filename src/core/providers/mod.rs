@@ -2,9 +2,9 @@
 
 pub mod ollama;
 
-use std::sync::Arc;
-use std::collections::HashMap;
 use crate::domain::provider::LlmProvider;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Registry of available LLM providers
 pub struct ProviderRegistry {

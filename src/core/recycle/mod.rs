@@ -7,8 +7,8 @@
 //! - [`categorizer`] - Smart message categorization
 //! - [`bin`] - Recycle bin storage and search
 
-pub mod categorizer;
 pub mod bin;
+pub mod categorizer;
 
-pub use categorizer::*;
 pub use bin::*;
+pub use categorizer::*;

@@ -55,16 +55,24 @@ pub enum AgentType {
 
 impl AgentType {
     pub fn can_handle(&self, task: &TaskType) -> bool {
-        matches!((self, task),
+        matches!(
+            (self, task),
             (AgentType::Orchestrator, _)
-            | (AgentType::Coder, TaskType::Code) | (AgentType::Coder, TaskType::Refactor)
-            | (AgentType::Researcher, TaskType::Research) | (AgentType::Researcher, TaskType::Analysis)
-            | (AgentType::Reviewer, TaskType::Review) | (AgentType::Reviewer, TaskType::Code)
-            | (AgentType::Tester, TaskType::Test) | (AgentType::Tester, TaskType::Benchmark)
-            | (AgentType::Architect, TaskType::Design) | (AgentType::Architect, TaskType::Plan)
-            | (AgentType::Security, TaskType::SecurityAudit) | (AgentType::Security, TaskType::Scan)
-            | (AgentType::Docs, TaskType::Documentation)
-            | (AgentType::DevOps, TaskType::Deploy) | (AgentType::DevOps, TaskType::Configure)
+                | (AgentType::Coder, TaskType::Code)
+                | (AgentType::Coder, TaskType::Refactor)
+                | (AgentType::Researcher, TaskType::Research)
+                | (AgentType::Researcher, TaskType::Analysis)
+                | (AgentType::Reviewer, TaskType::Review)
+                | (AgentType::Reviewer, TaskType::Code)
+                | (AgentType::Tester, TaskType::Test)
+                | (AgentType::Tester, TaskType::Benchmark)
+                | (AgentType::Architect, TaskType::Design)
+                | (AgentType::Architect, TaskType::Plan)
+                | (AgentType::Security, TaskType::SecurityAudit)
+                | (AgentType::Security, TaskType::Scan)
+                | (AgentType::Docs, TaskType::Documentation)
+                | (AgentType::DevOps, TaskType::Deploy)
+                | (AgentType::DevOps, TaskType::Configure)
         )
     }
 }
@@ -174,8 +182,8 @@ struct OrchMetrics {
     delegations: u64,
 }
 
-
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct Decision {
     timestamp: i64,
     reason: String,

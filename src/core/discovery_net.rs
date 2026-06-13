@@ -2,7 +2,7 @@
 //! Uses mDNS to find other MethodWhite nodes on the local network.
 
 use anyhow::Result;
-use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent};
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -24,7 +24,7 @@ impl NetworkDiscovery {
     pub fn broadcast(&self, node_id: &str, port: u16) -> Result<()> {
         let service_type = "_methodwhite._tcp.local.";
         let instance_name = format!("{}.{}", node_id, service_type);
-        
+
         let mut properties = HashMap::new();
         properties.insert("version".to_string(), "0.1.5".to_string());
         properties.insert("node_id".to_string(), node_id.to_string());
@@ -51,7 +51,12 @@ impl NetworkDiscovery {
             while let Ok(event) = receiver.recv_async().await {
                 if let ServiceEvent::ServiceResolved(info) = event {
                     let node_id = info.get_property_val_str("node_id").unwrap_or("unknown");
-                    let ip = info.get_addresses().iter().next().map(|a| a.to_string()).unwrap_or_default();
+                    let ip = info
+                        .get_addresses()
+                        .iter()
+                        .next()
+                        .map(|a| a.to_string())
+                        .unwrap_or_default();
                     let mut nodes = nodes.lock().unwrap();
                     println!("[Mesh] Discovered Node: {} @ {}", node_id, ip);
                     nodes.insert(node_id.to_string(), ip);

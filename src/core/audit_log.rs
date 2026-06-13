@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct AuditEntry {
     pub id: i64,
     pub observation_id: i64,
-    pub action: String,  // "update", "delete", "restore"
+    pub action: String, // "update", "delete", "restore"
     pub agent_id: String,
     pub old_value: Option<String>,
     pub new_value: Option<String>,
@@ -31,7 +31,14 @@ impl AuditLog {
     }
 
     /// Log an update action
-    pub fn log_update(&self, obs_id: i64, agent_id: &str, old_content: &str, new_content: &str, reason: Option<&str>) -> Result<()> {
+    pub fn log_update(
+        &self,
+        obs_id: i64,
+        agent_id: &str,
+        old_content: &str,
+        new_content: &str,
+        reason: Option<&str>,
+    ) -> Result<()> {
         let _entry = AuditEntry {
             id: self.current_timestamp(),
             observation_id: obs_id,

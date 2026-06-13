@@ -1,5 +1,4 @@
 //! Synapsis - Persistent Memory Engine for AI Agents
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 
 pub mod core;
 pub mod domain;

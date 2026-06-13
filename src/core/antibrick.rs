@@ -1,19 +1,17 @@
 //! Anti-Brick Protection Module
-//! 
+//!
 //! Detects and prevents potentially destructive operations that could brick devices.
 //! Integrates with Synapsis MCP for multi-agent coordination and local AI validation.
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 /// Risk levels for operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,7 +140,10 @@ impl AntiBrickEngine {
     fn test_ai_availability(&self) {
         let available = self.check_ai_available();
         self.ai_available.store(available, Ordering::Relaxed);
-        eprintln!("[AntiBrick] AI availability: {}", if available { "✅" } else { "❌" });
+        eprintln!(
+            "[AntiBrick] AI availability: {}",
+            if available { "✅" } else { "❌" }
+        );
     }
 
     fn check_ai_available(&self) -> bool {
@@ -179,7 +180,12 @@ impl AntiBrickEngine {
     }
 
     /// Analyze a command for potential brick threats
-    pub fn analyze_command(&self, cmd: &str, args: &[String], pid: u32) -> (RiskLevel, Option<BrickThreat>) {
+    pub fn analyze_command(
+        &self,
+        cmd: &str,
+        args: &[String],
+        _pid: u32,
+    ) -> (RiskLevel, Option<BrickThreat>) {
         // Check if user is whitelisted
         if let Ok(user) = std::env::var("USER") {
             if self.config.whitelist_users.contains(&user) {
@@ -203,20 +209,24 @@ impl AntiBrickEngine {
             "cat" if args.len() > 1 && args.iter().any(|a| a.starts_with("/dev/")) => {
                 self.analyze_cat_dev(args)
             }
-            "echo" if args.iter().any(|a| a.contains("/dev/") && a.contains(">")) => {
-                (RiskLevel::Critical, Some(BrickThreat::DiskWrite {
+            "echo" if args.iter().any(|a| a.contains("/dev/") && a.contains(">")) => (
+                RiskLevel::Critical,
+                Some(BrickThreat::DiskWrite {
                     target: args.iter().find(|a| a.contains("/dev/")).unwrap().clone(),
                     tool: "echo".to_string(),
-                }))
-            }
+                }),
+            ),
             _ => {
                 // Check if accessing protected paths
                 for arg in args {
                     if self.is_protected_path(arg) {
-                        return (RiskLevel::High, Some(BrickThreat::Suspicious {
-                            command: cmd.to_string(),
-                            reason: format!("Accessing protected path: {}", arg),
-                        }));
+                        return (
+                            RiskLevel::High,
+                            Some(BrickThreat::Suspicious {
+                                command: cmd.to_string(),
+                                reason: format!("Accessing protected path: {}", arg),
+                            }),
+                        );
                     }
                 }
                 (RiskLevel::Safe, None)
@@ -229,10 +239,13 @@ impl AntiBrickEngine {
             if arg.starts_with("of=") {
                 let target = arg.trim_start_matches("of=");
                 if target.starts_with("/dev/") {
-                    return (RiskLevel::Critical, Some(BrickThreat::DiskWrite {
-                        target: target.to_string(),
-                        tool: "dd".to_string(),
-                    }));
+                    return (
+                        RiskLevel::Critical,
+                        Some(BrickThreat::DiskWrite {
+                            target: target.to_string(),
+                            tool: "dd".to_string(),
+                        }),
+                    );
                 }
             }
         }
@@ -240,7 +253,7 @@ impl AntiBrickEngine {
     }
 
     fn analyze_fastboot(&self, args: &[String]) -> (RiskLevel, Option<BrickThreat>) {
-        let mut device = "unknown".to_string();
+        let device = "unknown".to_string();
         let mut command = "unknown".to_string();
 
         for (i, arg) in args.iter().enumerate() {
@@ -248,62 +261,86 @@ impl AntiBrickEngine {
                 "flash" => {
                     command = "flash".to_string();
                     if let Some(img) = args.get(i + 1) {
-                        return (RiskLevel::Critical, Some(BrickThreat::FirmwareFlash {
-                            device,
-                            image_type: img.clone(),
-                        }));
+                        return (
+                            RiskLevel::Critical,
+                            Some(BrickThreat::FirmwareFlash {
+                                device,
+                                image_type: img.clone(),
+                            }),
+                        );
                     }
                 }
                 "oem" => {
                     command = "oem".to_string();
                     if let Some(action) = args.get(i + 1) {
                         if action.contains("lock") || action.contains("unlock") {
-                            return (RiskLevel::Critical, Some(BrickThreat::BootloaderLock {
-                                device,
-                                action: action.clone(),
-                            }));
+                            return (
+                                RiskLevel::Critical,
+                                Some(BrickThreat::BootloaderLock {
+                                    device,
+                                    action: action.clone(),
+                                }),
+                            );
                         }
                     }
                 }
                 "erase" => {
-                    return (RiskLevel::Critical, Some(BrickThreat::BootloaderAccess {
-                        device,
-                        command: "erase".to_string(),
-                    }));
+                    return (
+                        RiskLevel::Critical,
+                        Some(BrickThreat::BootloaderAccess {
+                            device,
+                            command: "erase".to_string(),
+                        }),
+                    );
                 }
                 "format" => {
-                    return (RiskLevel::Critical, Some(BrickThreat::BootloaderAccess {
-                        device,
-                        command: "format".to_string(),
-                    }));
+                    return (
+                        RiskLevel::Critical,
+                        Some(BrickThreat::BootloaderAccess {
+                            device,
+                            command: "format".to_string(),
+                        }),
+                    );
                 }
                 _ => {}
             }
         }
 
-        (RiskLevel::Medium, Some(BrickThreat::BootloaderAccess { device, command }))
+        (
+            RiskLevel::Medium,
+            Some(BrickThreat::BootloaderAccess { device, command }),
+        )
     }
 
     fn analyze_heimdall(&self, args: &[String]) -> (RiskLevel, Option<BrickThreat>) {
         if args.iter().any(|a| a == "flash" || a == "--flash") {
-            return (RiskLevel::Critical, Some(BrickThreat::FirmwareFlash {
-                device: "samsung".to_string(),
-                image_type: args.join(" "),
-            }));
+            return (
+                RiskLevel::Critical,
+                Some(BrickThreat::FirmwareFlash {
+                    device: "samsung".to_string(),
+                    image_type: args.join(" "),
+                }),
+            );
         }
-        (RiskLevel::Medium, Some(BrickThreat::BootloaderAccess {
-            device: "samsung".to_string(),
-            command: args.join(" "),
-        }))
+        (
+            RiskLevel::Medium,
+            Some(BrickThreat::BootloaderAccess {
+                device: "samsung".to_string(),
+                command: args.join(" "),
+            }),
+        )
     }
 
     fn analyze_fdisk(&self, args: &[String]) -> (RiskLevel, Option<BrickThreat>) {
         for arg in args {
             if arg.starts_with("/dev/") {
-                return (RiskLevel::Critical, Some(BrickThreat::PartitionModify {
-                    disk: arg.clone(),
-                    tool: "fdisk".to_string(),
-                }));
+                return (
+                    RiskLevel::Critical,
+                    Some(BrickThreat::PartitionModify {
+                        disk: arg.clone(),
+                        tool: "fdisk".to_string(),
+                    }),
+                );
             }
         }
         (RiskLevel::High, None)
@@ -312,10 +349,13 @@ impl AntiBrickEngine {
     fn analyze_parted(&self, args: &[String]) -> (RiskLevel, Option<BrickThreat>) {
         for arg in args {
             if arg.starts_with("/dev/") {
-                return (RiskLevel::Critical, Some(BrickThreat::PartitionModify {
-                    disk: arg.clone(),
-                    tool: "parted".to_string(),
-                }));
+                return (
+                    RiskLevel::Critical,
+                    Some(BrickThreat::PartitionModify {
+                        disk: arg.clone(),
+                        tool: "parted".to_string(),
+                    }),
+                );
             }
         }
         (RiskLevel::High, None)
@@ -324,10 +364,13 @@ impl AntiBrickEngine {
     fn analyze_mkfs(&self, args: &[String], tool: &str) -> (RiskLevel, Option<BrickThreat>) {
         for arg in args {
             if arg.starts_with("/dev/") {
-                return (RiskLevel::Critical, Some(BrickThreat::FilesystemDestroy {
-                    partition: arg.clone(),
-                    tool: tool.to_string(),
-                }));
+                return (
+                    RiskLevel::Critical,
+                    Some(BrickThreat::FilesystemDestroy {
+                        partition: arg.clone(),
+                        tool: tool.to_string(),
+                    }),
+                );
             }
         }
         (RiskLevel::High, None)
@@ -338,10 +381,13 @@ impl AntiBrickEngine {
             if arg.starts_with("/dev/") {
                 // fsck can be destructive if used with -y or -a on wrong partition
                 if args.iter().any(|a| a == "-y" || a == "-a") {
-                    return (RiskLevel::High, Some(BrickThreat::FilesystemDestroy {
-                        partition: arg.clone(),
-                        tool: "fsck".to_string(),
-                    }));
+                    return (
+                        RiskLevel::High,
+                        Some(BrickThreat::FilesystemDestroy {
+                            partition: arg.clone(),
+                            tool: "fsck".to_string(),
+                        }),
+                    );
                 }
             }
         }
@@ -351,57 +397,75 @@ impl AntiBrickEngine {
     fn analyze_mount(&self, args: &[String], cmd: &str) -> (RiskLevel, Option<BrickThreat>) {
         for arg in args {
             if arg.starts_with("/dev/") {
-                return (RiskLevel::Medium, Some(BrickThreat::MountOperation {
-                    path: arg.clone(),
-                    operation: cmd.to_string(),
-                }));
+                return (
+                    RiskLevel::Medium,
+                    Some(BrickThreat::MountOperation {
+                        path: arg.clone(),
+                        operation: cmd.to_string(),
+                    }),
+                );
             }
         }
         (RiskLevel::Low, None)
     }
 
     fn analyze_adb(&self, args: &[String]) -> (RiskLevel, Option<BrickThreat>) {
-        let mut device = "unknown".to_string();
+        let device = "unknown".to_string();
 
         for (i, arg) in args.iter().enumerate() {
             match arg.as_str() {
                 "flash" | "flash-all" => {
-                    return (RiskLevel::Critical, Some(BrickThreat::FirmwareFlash {
-                        device,
-                        image_type: "adb_flash".to_string(),
-                    }));
+                    return (
+                        RiskLevel::Critical,
+                        Some(BrickThreat::FirmwareFlash {
+                            device,
+                            image_type: "adb_flash".to_string(),
+                        }),
+                    );
                 }
                 "oem" => {
                     if let Some(action) = args.get(i + 1) {
                         if action.contains("lock") || action.contains("unlock") {
-                            return (RiskLevel::Critical, Some(BrickThreat::BootloaderLock {
-                                device,
-                                action: action.clone(),
-                            }));
+                            return (
+                                RiskLevel::Critical,
+                                Some(BrickThreat::BootloaderLock {
+                                    device,
+                                    action: action.clone(),
+                                }),
+                            );
                         }
                     }
                 }
                 "reboot" => {
                     if let Some(mode) = args.get(i + 1) {
                         if mode == "bootloader" || mode == "download" {
-                            return (RiskLevel::Medium, Some(BrickThreat::BootloaderAccess {
-                                device,
-                                command: format!("reboot {}", mode),
-                            }));
+                            return (
+                                RiskLevel::Medium,
+                                Some(BrickThreat::BootloaderAccess {
+                                    device,
+                                    command: format!("reboot {}", mode),
+                                }),
+                            );
                         }
                     }
                 }
                 "erase" => {
-                    return (RiskLevel::Critical, Some(BrickThreat::BootloaderAccess {
-                        device,
-                        command: "erase".to_string(),
-                    }));
+                    return (
+                        RiskLevel::Critical,
+                        Some(BrickThreat::BootloaderAccess {
+                            device,
+                            command: "erase".to_string(),
+                        }),
+                    );
                 }
                 "wipe" => {
-                    return (RiskLevel::Critical, Some(BrickThreat::BootloaderAccess {
-                        device,
-                        command: "wipe".to_string(),
-                    }));
+                    return (
+                        RiskLevel::Critical,
+                        Some(BrickThreat::BootloaderAccess {
+                            device,
+                            command: "wipe".to_string(),
+                        }),
+                    );
                 }
                 _ => {}
             }
@@ -412,14 +476,24 @@ impl AntiBrickEngine {
 
     fn analyze_cat_dev(&self, args: &[String]) -> (RiskLevel, Option<BrickThreat>) {
         // cat > /dev/xxx is extremely dangerous
-        (RiskLevel::Critical, Some(BrickThreat::DiskWrite {
-            target: args.iter().find(|a| a.starts_with("/dev/")).unwrap().clone(),
-            tool: "cat".to_string(),
-        }))
+        (
+            RiskLevel::Critical,
+            Some(BrickThreat::DiskWrite {
+                target: args
+                    .iter()
+                    .find(|a| a.starts_with("/dev/"))
+                    .unwrap()
+                    .clone(),
+                tool: "cat".to_string(),
+            }),
+        )
     }
 
     fn is_protected_path(&self, path: &str) -> bool {
-        self.config.protected_paths.iter().any(|p| path.starts_with(p))
+        self.config
+            .protected_paths
+            .iter()
+            .any(|p| path.starts_with(p))
     }
 
     /// Create an audit event
@@ -522,11 +596,11 @@ Justificación breve (1 línea):"#,
                             event.blocked = true;
                             return false;
                         }
-                        
+
                         return true;
                     }
                 }
-                
+
                 // JSON parse failed
                 !(self.config.auto_block_critical && event.risk_level == RiskLevel::Critical)
             }
@@ -582,7 +656,7 @@ Justificación breve (1 línea):"#,
         }
 
         let log_line = serde_json::to_string(event).unwrap_or_default();
-        
+
         if let Ok(mut file) = fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -591,8 +665,13 @@ Justificación breve (1 línea):"#,
             let _ = writeln!(file, "{}", log_line);
         }
 
-        eprintln!("[AntiBrick] {} - {} - {:?}", 
-            if event.blocked { "🚫 BLOCKED" } else { "✅ ALLOWED" },
+        eprintln!(
+            "[AntiBrick] {} - {} - {:?}",
+            if event.blocked {
+                "🚫 BLOCKED"
+            } else {
+                "✅ ALLOWED"
+            },
             event.command,
             event.risk_level
         );
@@ -641,7 +720,10 @@ Justificación breve (1 línea):"#,
     pub fn stats(&self) -> serde_json::Value {
         let threats = self.get_active_threats();
         let blocked = threats.iter().filter(|e| e.blocked).count();
-        let critical = threats.iter().filter(|e| e.risk_level == RiskLevel::Critical).count();
+        let critical = threats
+            .iter()
+            .filter(|e| e.risk_level == RiskLevel::Critical)
+            .count();
 
         serde_json::json!({
             "enabled": self.config.enabled,
@@ -666,7 +748,7 @@ pub mod mcp_tools {
     ) -> serde_json::Value {
         let pid = std::process::id();
         let (risk, threat) = engine.analyze_command(command, &args, pid);
-        
+
         json!({
             "command": command,
             "args": args,
@@ -694,7 +776,7 @@ pub mod mcp_tools {
         engine.stats()
     }
 
-    pub fn handle_antibrick_enable(engine: &AntiBrickEngine, enable: bool) -> serde_json::Value {
+    pub fn handle_antibrick_enable(_engine: &AntiBrickEngine, enable: bool) -> serde_json::Value {
         json!({
             "status": "ok",
             "enabled": enable,
@@ -712,7 +794,7 @@ mod tests {
         let engine = AntiBrickEngine::new(AntiBrickConfig::default());
         let args = vec!["if=image.img".to_string(), "of=/dev/sda".to_string()];
         let (risk, threat) = engine.analyze_command("dd", &args, 1234);
-        
+
         assert_eq!(risk, RiskLevel::Critical);
         assert!(matches!(threat, Some(BrickThreat::DiskWrite { .. })));
     }
@@ -720,9 +802,13 @@ mod tests {
     #[test]
     fn test_fastboot_flash_detection() {
         let engine = AntiBrickEngine::new(AntiBrickConfig::default());
-        let args = vec!["flash".to_string(), "boot".to_string(), "boot.img".to_string()];
+        let args = vec![
+            "flash".to_string(),
+            "boot".to_string(),
+            "boot.img".to_string(),
+        ];
         let (risk, _threat) = engine.analyze_command("fastboot", &args, 1234);
-        
+
         assert_eq!(risk, RiskLevel::Critical);
     }
 
@@ -731,7 +817,7 @@ mod tests {
         let engine = AntiBrickEngine::new(AntiBrickConfig::default());
         let args = vec!["-la".to_string()];
         let (risk, _threat) = engine.analyze_command("ls", &args, 1234);
-        
+
         assert_eq!(risk, RiskLevel::Safe);
     }
 }
