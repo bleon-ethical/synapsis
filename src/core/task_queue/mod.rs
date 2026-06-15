@@ -1,12 +1,6 @@
-//! Synapsis Autonomous Task Queue System
-//!
-//! Auto-assignment based on agent skills/capacity, with heartbeat monitoring
-//! and automatic task re-queuing on agent failure.
+mod types;
 
-use crate::core::uuid::Uuid;
-use crate::domain::types::Timestamp;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
+use crate::core::lock_utils::*;
 use std::collections::{BinaryHeap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
@@ -14,196 +8,10 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 use tokio::time::{interval, Duration};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TaskStatus {
-    Pending,
-    Assigned,
-    InProgress,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Priority {
-    Low = 0,
-    Normal = 1,
-    High = 2,
-    Critical = 3,
-}
-
-impl Ord for Priority {
-    fn cmp(&self, other: &Self) -> Ordering {
-        (*self as u8).cmp(&(*other as u8)).reverse()
-    }
-}
-
-impl PartialOrd for Priority {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    pub id: String,
-    pub description: String,
-    pub required_skills: Vec<String>,
-    pub priority: Priority,
-    pub status: TaskStatus,
-    pub assigned_to: Option<String>,
-    pub created_at: Timestamp,
-    pub deadline: Option<Timestamp>,
-    pub timeout_secs: Option<u64>,
-    pub result: Option<String>,
-    pub retry_count: u32,
-    pub max_retries: u32,
-}
-
-impl Task {
-    pub fn new(description: String, required_skills: Vec<String>, priority: Priority) -> Self {
-        Self {
-            id: format!("task-{}", Uuid::new_v4().to_hex_string()),
-            description,
-            required_skills,
-            priority,
-            status: TaskStatus::Pending,
-            assigned_to: None,
-            created_at: Timestamp::now(),
-            deadline: None,
-            timeout_secs: None,
-            result: None,
-            retry_count: 0,
-            max_retries: 3,
-        }
-    }
-
-    pub fn with_deadline(mut self, deadline: Timestamp) -> Self {
-        self.deadline = Some(deadline);
-        self
-    }
-
-    pub fn with_timeout(mut self, timeout_secs: u64) -> Self {
-        self.timeout_secs = Some(timeout_secs);
-        self
-    }
-
-    pub fn with_max_retries(mut self, max: u32) -> Self {
-        self.max_retries = max;
-        self
-    }
-
-    pub fn is_expired(&self) -> bool {
-        if let Some(deadline) = self.deadline {
-            return Timestamp::now() > deadline;
-        }
-        false
-    }
-
-    pub fn can_retry(&self) -> bool {
-        self.retry_count < self.max_retries
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentInfo {
-    pub id: String,
-    pub agent_type: String,
-    pub skills: Vec<String>,
-    pub capacity: u32,
-    pub current_load: u32,
-    pub last_heartbeat: Timestamp,
-    pub is_available: bool,
-}
-
-impl AgentInfo {
-    pub fn new(id: String, agent_type: String, skills: Vec<String>, capacity: u32) -> Self {
-        Self {
-            id,
-            agent_type,
-            skills,
-            capacity,
-            current_load: 0,
-            last_heartbeat: Timestamp::now(),
-            is_available: true,
-        }
-    }
-
-    pub fn has_capacity(&self) -> bool {
-        self.current_load < self.capacity && self.is_available
-    }
-
-    pub fn matches_skills(&self, required: &[String]) -> bool {
-        required.iter().any(|s| self.skills.contains(s))
-    }
-
-    pub fn skill_score(&self, required: &[String]) -> usize {
-        required.iter().filter(|s| self.skills.contains(s)).count()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskQueueEvent {
-    pub event_type: TaskQueueEventType,
-    pub task_id: String,
-    pub agent_id: Option<String>,
-    pub timestamp: Timestamp,
-    pub payload: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TaskQueueEventType {
-    TaskCreated,
-    TaskAssigned,
-    TaskStarted,
-    TaskCompleted,
-    TaskFailed,
-    TaskRequeued,
-    AgentRegistered,
-    AgentHeartbeat,
-    AgentTimeout,
-    AgentUnavailable,
-}
-
-struct PriorityTask {
-    task: Task,
-    order: u64,
-}
-
-impl PartialEq for PriorityTask {
-    fn eq(&self, other: &Self) -> bool {
-        self.priority().eq(&other.priority()) && self.order.eq(&other.order)
-    }
-}
-
-impl Eq for PriorityTask {}
-
-impl PartialOrd for PriorityTask {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PriorityTask {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.priority()
-            .cmp(&other.priority())
-            .then_with(|| self.order.cmp(&other.order))
-    }
-}
-
-impl PriorityTask {
-    fn new(task: Task, order: u64) -> Self {
-        Self { task, order }
-    }
-
-    fn priority(&self) -> Priority {
-        if self.task.is_expired() {
-            return Priority::Critical;
-        }
-        self.task.priority
-    }
-}
+pub use types::{
+    AgentInfo, Priority, Task, TaskQueueEvent, TaskQueueEventType, TaskStatus,
+};
+use types::PriorityTask;
 
 pub struct TaskQueue {
     pending_queue: Arc<RwLock<BinaryHeap<PriorityTask>>>,
@@ -261,7 +69,7 @@ impl TaskQueue {
         let task_id = task.id.clone();
 
         {
-            let mut queue = self.pending_queue.write().unwrap();
+            let mut queue = self.pending_queue.write_safe();
             queue.push(PriorityTask::new(task, order));
         }
 
@@ -269,7 +77,7 @@ impl TaskQueue {
             event_type: TaskQueueEventType::TaskCreated,
             task_id: task_id.clone(),
             agent_id: None,
-            timestamp: Timestamp::now(),
+            timestamp: crate::domain::types::Timestamp::now(),
             payload: None,
         });
 
@@ -298,7 +106,7 @@ impl TaskQueue {
     ) {
         let agent = AgentInfo::new(agent_id.clone(), agent_type, skills, capacity);
         {
-            let mut agents = self.agents.write().unwrap();
+            let mut agents = self.agents.write_safe();
             agents.insert(agent_id.clone(), agent);
         }
 
@@ -306,7 +114,7 @@ impl TaskQueue {
             event_type: TaskQueueEventType::AgentRegistered,
             task_id: String::new(),
             agent_id: Some(agent_id.clone()),
-            timestamp: Timestamp::now(),
+            timestamp: crate::domain::types::Timestamp::now(),
             payload: None,
         });
 
@@ -315,9 +123,9 @@ impl TaskQueue {
 
     pub fn heartbeat(&self, agent_id: &str) {
         let was_available = {
-            let mut agents = self.agents.write().unwrap();
+            let mut agents = self.agents.write_safe();
             if let Some(agent) = agents.get_mut(agent_id) {
-                agent.last_heartbeat = Timestamp::now();
+                agent.last_heartbeat = crate::domain::types::Timestamp::now();
                 agent.is_available = true;
                 agent.is_available
             } else {
@@ -330,7 +138,7 @@ impl TaskQueue {
                 event_type: TaskQueueEventType::AgentHeartbeat,
                 task_id: String::new(),
                 agent_id: Some(agent_id.to_string()),
-                timestamp: Timestamp::now(),
+                timestamp: crate::domain::types::Timestamp::now(),
                 payload: None,
             });
         }
@@ -338,7 +146,7 @@ impl TaskQueue {
 
     pub fn unregister_agent(&self, agent_id: &str) {
         let tasks_to_requeue: Vec<Task> = {
-            let mut agents = self.agents.write().unwrap();
+            let mut agents = self.agents.write_safe();
             agents.remove(agent_id);
             Vec::new()
         };
@@ -353,7 +161,7 @@ impl TaskQueue {
 
     pub fn start_task(&self, task_id: &str, agent_id: &str) -> bool {
         let (should_emit, _task) = {
-            let mut assigned = self.assigned_tasks.write().unwrap();
+            let mut assigned = self.assigned_tasks.write_safe();
             if let Some(task) = assigned.get_mut(task_id) {
                 if task.assigned_to.as_deref() == Some(agent_id) {
                     task.status = TaskStatus::InProgress;
@@ -361,7 +169,7 @@ impl TaskQueue {
                         event_type: TaskQueueEventType::TaskStarted,
                         task_id: task_id.to_string(),
                         agent_id: Some(agent_id.to_string()),
-                        timestamp: Timestamp::now(),
+                        timestamp: crate::domain::types::Timestamp::now(),
                         payload: None,
                     });
                     (true, task.clone())
@@ -381,7 +189,7 @@ impl TaskQueue {
 
     pub fn complete_task(&self, task_id: &str, result: Option<String>, success: bool) -> bool {
         let _aid = {
-            let mut assigned = self.assigned_tasks.write().unwrap();
+            let mut assigned = self.assigned_tasks.write_safe();
             if let Some(mut task) = assigned.remove(task_id) {
                 task.result = result;
                 task.status = if success {
@@ -394,7 +202,7 @@ impl TaskQueue {
                 drop(assigned);
 
                 if let Some(a) = &prev_aid {
-                    let mut agents = self.agents.write().unwrap();
+                    let mut agents = self.agents.write_safe();
                     if let Some(agent) = agents.get_mut(a) {
                         agent.current_load = agent.current_load.saturating_sub(1);
                     }
@@ -402,7 +210,7 @@ impl TaskQueue {
 
                 let _t = task.clone();
                 {
-                    let mut completed = self.completed_tasks.write().unwrap();
+                    let mut completed = self.completed_tasks.write_safe();
                     completed.insert(task_id.to_string(), task);
                 }
 
@@ -414,7 +222,7 @@ impl TaskQueue {
                     },
                     task_id: task_id.to_string(),
                     agent_id: prev_aid.clone(),
-                    timestamp: Timestamp::now(),
+                    timestamp: crate::domain::types::Timestamp::now(),
                     payload: None,
                 });
 
@@ -430,30 +238,30 @@ impl TaskQueue {
     }
 
     pub fn get_pending_tasks(&self) -> Vec<Task> {
-        let queue = self.pending_queue.read().unwrap();
+        let queue = self.pending_queue.read_safe();
         queue.iter().map(|pt| pt.task.clone()).collect()
     }
 
     pub fn get_assigned_tasks(&self) -> Vec<Task> {
-        let assigned = self.assigned_tasks.read().unwrap();
+        let assigned = self.assigned_tasks.read_safe();
         assigned.values().cloned().collect()
     }
 
     pub fn get_task(&self, task_id: &str) -> Option<Task> {
         {
-            let queue = self.pending_queue.read().unwrap();
+            let queue = self.pending_queue.read_safe();
             if let Some(pt) = queue.iter().find(|pt| pt.task.id == task_id) {
                 return Some(pt.task.clone());
             }
         }
         {
-            let assigned = self.assigned_tasks.read().unwrap();
+            let assigned = self.assigned_tasks.read_safe();
             if let Some(t) = assigned.get(task_id) {
                 return Some(t.clone());
             }
         }
         {
-            let completed = self.completed_tasks.read().unwrap();
+            let completed = self.completed_tasks.read_safe();
             if let Some(t) = completed.get(task_id) {
                 return Some(t.clone());
             }
@@ -462,12 +270,12 @@ impl TaskQueue {
     }
 
     pub fn get_agent(&self, agent_id: &str) -> Option<AgentInfo> {
-        let agents = self.agents.read().unwrap();
+        let agents = self.agents.read_safe();
         agents.get(agent_id).cloned()
     }
 
     pub fn get_idle_agents(&self) -> Vec<AgentInfo> {
-        let agents = self.agents.read().unwrap();
+        let agents = self.agents.read_safe();
         agents
             .values()
             .filter(|a| a.has_capacity())
@@ -477,23 +285,23 @@ impl TaskQueue {
 
     pub fn get_queue_stats(&self) -> serde_json::Value {
         let pending = {
-            let q = self.pending_queue.read().unwrap();
+            let q = self.pending_queue.read_safe();
             q.len()
         };
         let assigned = {
-            let a = self.assigned_tasks.read().unwrap();
+            let a = self.assigned_tasks.read_safe();
             a.len()
         };
         let completed = {
-            let c = self.completed_tasks.read().unwrap();
+            let c = self.completed_tasks.read_safe();
             c.len()
         };
         let agents = {
-            let a = self.agents.read().unwrap();
+            let a = self.agents.read_safe();
             a.len()
         };
         let idle_agents = {
-            let a = self.agents.read().unwrap();
+            let a = self.agents.read_safe();
             a.values().filter(|ag| ag.has_capacity()).count()
         };
 
@@ -513,12 +321,12 @@ impl TaskQueue {
         }
 
         let tasks_to_assign: Vec<(Task, String)> = {
-            let mut queue = self.pending_queue.write().unwrap();
+            let mut queue = self.pending_queue.write_safe();
             let mut tasks_to_assign = Vec::new();
 
             while let Some(pt) = queue.pop() {
                 if pt.task.is_expired() && !pt.task.can_retry() {
-                    let mut failed = self.assigned_tasks.write().unwrap();
+                    let mut failed = self.assigned_tasks.write_safe();
                     let mut task = pt.task;
                     task.status = TaskStatus::Failed;
                     failed.insert(task.id.clone(), task);
@@ -541,11 +349,11 @@ impl TaskQueue {
 
         for (task, agent_id) in tasks_to_assign {
             {
-                let mut assigned = self.assigned_tasks.write().unwrap();
+                let mut assigned = self.assigned_tasks.write_safe();
                 assigned.insert(task.id.clone(), task.clone());
             }
             {
-                let mut agents = self.agents.write().unwrap();
+                let mut agents = self.agents.write_safe();
                 if let Some(agent) = agents.get_mut(&agent_id) {
                     agent.current_load += 1;
                 }
@@ -555,7 +363,7 @@ impl TaskQueue {
                 event_type: TaskQueueEventType::TaskAssigned,
                 task_id: task.id,
                 agent_id: Some(agent_id),
-                timestamp: Timestamp::now(),
+                timestamp: crate::domain::types::Timestamp::now(),
                 payload: None,
             });
         }
@@ -579,12 +387,12 @@ impl TaskQueue {
     }
 
     pub fn check_agent_timeouts(&self) -> Vec<String> {
-        let now = Timestamp::now();
+        let now = crate::domain::types::Timestamp::now();
         let timeout_threshold = self.heartbeat_timeout_secs as i64;
         let mut timed_out_agents = Vec::new();
 
         let tasks_to_requeue: Vec<Task> = {
-            let mut agents = self.agents.write().unwrap();
+            let mut agents = self.agents.write_safe();
             let mut to_requeue = Vec::new();
 
             for (agent_id, agent) in agents.iter_mut() {
@@ -597,7 +405,7 @@ impl TaskQueue {
                         event_type: TaskQueueEventType::AgentTimeout,
                         task_id: String::new(),
                         agent_id: Some(agent_id.clone()),
-                        timestamp: Timestamp::now(),
+                        timestamp: crate::domain::types::Timestamp::now(),
                         payload: Some(serde_json::json!({
                             "last_heartbeat": agent.last_heartbeat.0,
                             "elapsed_secs": elapsed
@@ -609,7 +417,7 @@ impl TaskQueue {
             drop(agents);
 
             if !timed_out_agents.is_empty() {
-                let mut assigned = self.assigned_tasks.write().unwrap();
+                let mut assigned = self.assigned_tasks.write_safe();
                 let mut requeued = Vec::new();
 
                 for agent_id in &timed_out_agents {
@@ -634,14 +442,14 @@ impl TaskQueue {
                                 event_type: TaskQueueEventType::TaskRequeued,
                                 task_id: task_id.clone(),
                                 agent_id: Some(agent_id.clone()),
-                                timestamp: Timestamp::now(),
+                                timestamp: crate::domain::types::Timestamp::now(),
                                 payload: Some(serde_json::json!({
                                     "retry_count": retry_count
                                 })),
                             });
                         } else {
                             t.status = TaskStatus::Failed;
-                            let mut completed = self.completed_tasks.write().unwrap();
+                            let mut completed = self.completed_tasks.write_safe();
                             completed.insert(task_id, t);
                         }
                     }
@@ -660,7 +468,7 @@ impl TaskQueue {
 
     pub fn cancel_task(&self, task_id: &str) -> bool {
         {
-            let mut queue = self.pending_queue.write().unwrap();
+            let mut queue = self.pending_queue.write_safe();
             let old: Vec<PriorityTask> = queue.drain().collect();
             for pt in old {
                 if pt.task.id != task_id {
@@ -670,7 +478,7 @@ impl TaskQueue {
         }
 
         let (agent_id, was_assigned) = {
-            let mut assigned = self.assigned_tasks.write().unwrap();
+            let mut assigned = self.assigned_tasks.write_safe();
             if let Some(task) = assigned.remove(task_id) {
                 (task.assigned_to.clone(), true)
             } else {
@@ -679,13 +487,13 @@ impl TaskQueue {
         };
 
         if let Some(aid) = agent_id {
-            let mut agents = self.agents.write().unwrap();
+            let mut agents = self.agents.write_safe();
             if let Some(agent) = agents.get_mut(&aid) {
                 agent.current_load = agent.current_load.saturating_sub(1);
             }
         }
 
-        let mut completed = self.completed_tasks.write().unwrap();
+        let mut completed = self.completed_tasks.write_safe();
         completed.insert(
             task_id.to_string(),
             Task {
@@ -695,7 +503,7 @@ impl TaskQueue {
                 priority: Priority::Normal,
                 status: TaskStatus::Cancelled,
                 assigned_to: None,
-                created_at: Timestamp::now(),
+                created_at: crate::domain::types::Timestamp::now(),
                 deadline: None,
                 timeout_secs: None,
                 result: None,
@@ -712,22 +520,22 @@ impl TaskQueue {
         std::fs::create_dir_all(&self.data_dir)?;
 
         let pending: Vec<Task> = {
-            let q = self.pending_queue.read().unwrap();
+            let q = self.pending_queue.read_safe();
             q.iter().map(|pt| pt.task.clone()).collect()
         };
 
         let assigned: Vec<Task> = {
-            let a = self.assigned_tasks.read().unwrap();
+            let a = self.assigned_tasks.read_safe();
             a.values().cloned().collect()
         };
 
         let completed: Vec<Task> = {
-            let c = self.completed_tasks.read().unwrap();
+            let c = self.completed_tasks.read_safe();
             c.values().cloned().collect()
         };
 
         let agents: Vec<AgentInfo> = {
-            let a = self.agents.read().unwrap();
+            let a = self.agents.read_safe();
             a.values().cloned().collect()
         };
 
@@ -754,7 +562,7 @@ impl TaskQueue {
     pub fn load(&self) -> std::io::Result<()> {
         if let Ok(file) = std::fs::File::open(self.data_dir.join("pending.json")) {
             if let Ok(pending) = serde_json::from_reader::<_, Vec<Task>>(file) {
-                let mut queue = self.pending_queue.write().unwrap();
+                let mut queue = self.pending_queue.write_safe();
                 let mut order = 0u64;
                 for task in pending {
                     queue.push(PriorityTask::new(task, order));
@@ -766,7 +574,7 @@ impl TaskQueue {
 
         if let Ok(file) = std::fs::File::open(self.data_dir.join("assigned.json")) {
             if let Ok(assigned) = serde_json::from_reader::<_, Vec<Task>>(file) {
-                let mut a = self.assigned_tasks.write().unwrap();
+                let mut a = self.assigned_tasks.write_safe();
                 for task in assigned {
                     a.insert(task.id.clone(), task);
                 }
@@ -775,7 +583,7 @@ impl TaskQueue {
 
         if let Ok(file) = std::fs::File::open(self.data_dir.join("completed.json")) {
             if let Ok(completed) = serde_json::from_reader::<_, Vec<Task>>(file) {
-                let mut c = self.completed_tasks.write().unwrap();
+                let mut c = self.completed_tasks.write_safe();
                 for task in completed {
                     c.insert(task.id.clone(), task);
                 }
@@ -784,7 +592,7 @@ impl TaskQueue {
 
         if let Ok(file) = std::fs::File::open(self.data_dir.join("agents.json")) {
             if let Ok(agents) = serde_json::from_reader::<_, Vec<AgentInfo>>(file) {
-                let mut a = self.agents.write().unwrap();
+                let mut a = self.agents.write_safe();
                 for agent in agents {
                     a.insert(agent.id.clone(), agent);
                 }
