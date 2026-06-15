@@ -805,7 +805,23 @@ fn derive_antibrick_key() -> Vec<u8> {
             }
         }
     }
-    b"synapsis-antibrick-secret".to_vec()
+    let key_path = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("synapsis")
+        .join(".antibrick_secret");
+    if let Ok(data) = std::fs::read(&key_path) {
+        if data.len() >= 32 {
+            return data;
+        }
+    }
+    eprintln!("[SYNAPSIS] Generating new anti-brick HMAC key at: {}", key_path.display());
+    let mut key = vec![0u8; 32];
+    getrandom::getrandom(&mut key).expect("failed to generate random key");
+    if let Some(parent) = key_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&key_path, &key);
+    key
 }
 
 #[cfg(test)]

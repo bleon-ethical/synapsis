@@ -33,12 +33,30 @@ pub struct SessionId {
     pub signature: String,
 }
 
-/// Get secret key from environment or use default (for development only)
+/// Get secret key from environment or generate on first boot
 fn get_secret_key() -> Vec<u8> {
-    env::var("SYNAPSIS_SECRET_KEY")
-        .unwrap_or_else(|_| "synapsis-default-secret-key-change-in-production".to_string())
-        .as_bytes()
-        .to_vec()
+    if let Ok(key) = env::var("SYNAPSIS_SECRET_KEY") {
+        if !key.is_empty() {
+            return key.as_bytes().to_vec();
+        }
+    }
+    let key_path = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("synapsis")
+        .join(".session_secret");
+    if let Ok(data) = std::fs::read(&key_path) {
+        if data.len() >= 32 {
+            return data;
+        }
+    }
+    eprintln!("[SYNAPSIS] Generating new session HMAC key at: {}", key_path.display());
+    let mut key = vec![0u8; 32];
+    getrandom::getrandom(&mut key).expect("failed to generate random key");
+    if let Some(parent) = key_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&key_path, &key);
+    key
 }
 
 /// Generate HMAC-SHA256 signature for session data
@@ -52,10 +70,22 @@ fn generate_signature(cli_type: &str, uuid: &str, timestamp: i64) -> String {
     hex::encode(result.into_bytes())
 }
 
+/// Constant-time comparison to prevent timing attacks
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        result |= x ^ y;
+    }
+    result == 0
+}
+
 /// Verify HMAC signature
 pub fn verify_signature(cli_type: &str, uuid: &str, timestamp: i64, signature: &str) -> bool {
     let expected = generate_signature(cli_type, uuid, timestamp);
-    signature == expected
+    constant_time_eq(&expected, signature)
 }
 
 impl SessionId {

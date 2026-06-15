@@ -1,5 +1,6 @@
 //! Multi-Agent Safe Database with Session Validation
 
+use crate::core::lock_utils::*;
 use crate::infrastructure::database::Database;
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
@@ -43,13 +44,13 @@ impl MultiAgentDatabase {
         }
 
         let lock = {
-            let mut locks = self.agent_locks.write().unwrap();
+            let mut locks = self.agent_locks.write_safe();
             locks
                 .entry(agent_id.into())
                 .or_insert_with(|| Arc::new(RwLock::new(())))
                 .clone()
         };
-        let _guard = lock.write().unwrap();
+        let _guard = lock.write_safe();
         op(&self.db)
     }
 
@@ -95,7 +96,7 @@ impl Clone for MultiAgentDatabase {
     fn clone(&self) -> Self {
         Self {
             db: self.db.clone(),
-            agent_locks: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            agent_locks: self.agent_locks.clone(),
         }
     }
 }

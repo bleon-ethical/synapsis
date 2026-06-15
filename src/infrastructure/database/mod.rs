@@ -34,8 +34,7 @@ pub struct Database {
     encryption_key: Option<Vec<u8>>,
 }
 
-unsafe impl Send for Database {}
-unsafe impl Sync for Database {}
+
 
 impl Database {
     pub fn new() -> Self {
@@ -65,9 +64,8 @@ impl Database {
             match Connection::open(&db_path) {
                 Ok(conn) => {
                     let hex_key = hex::encode(key);
-                    if conn
-                        .execute_batch(&format!("PRAGMA key = 'x{}'", hex_key))
-                        .is_err()
+                    let pragma = format!("PRAGMA key = x'{}'", hex_key);
+                    if conn.execute_batch(&pragma).is_err()
                     {
                         db_warn!("[Database] Warning: failed to set encryption key");
                     }
@@ -195,10 +193,6 @@ impl Database {
             )
             .unwrap_or(0);
 
-        if version < 1 {
-            conn.execute_batch("DROP TABLE IF EXISTS observations").ok();
-        }
-
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS observations (
@@ -311,7 +305,6 @@ impl Database {
         )?;
 
         if version >= 1 && version < 2 {
-            // Rebuild FTS index for existing observations
             let _ = conn.execute_batch(
                 "INSERT INTO observations_fts(rowid, title, content) SELECT id, title, content FROM observations;
                  INSERT INTO schema_version (version) VALUES (2);"
@@ -737,15 +730,36 @@ impl Database {
             ],
         )?;
         let id = conn.last_insert_rowid();
-        // Sync FTS index
         let _ = conn.execute(
             "INSERT INTO observations_fts(rowid, title, content) VALUES (?1, ?2, ?3)",
             params![id, obs.title, obs.content],
         );
+        let _ = conn.execute_batch(
+            "INSERT INTO observations_fts(observations_fts) VALUES('rebuild')"
+        );
         Ok(ObservationId::new(id))
     }
 
-    pub fn search_fts5(&self, query: &str, limit: i32) -> Result<Vec<serde_json::Value>> {
+fn sanitize_fts_query(query: &str) -> String {
+    let lower = query.to_lowercase();
+    let dangerous = ["or ", "and ", "not ", "near(", "\"", "+", "-"];
+    if dangerous.iter().any(|d| lower.contains(d)) {
+        let sanitized: String = query
+            .chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_')
+            .collect();
+        return sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+    }
+    query.to_string()
+}
+
+    pub fn search_fts5(
+        &self,
+        query: &str,
+        project: Option<&str>,
+        scope: Option<&str>,
+        limit: i32,
+    ) -> Result<Vec<serde_json::Value>> {
         let conn = self.get_conn();
         let mut stmt = conn.prepare(
             "SELECT o.id, o.title, o.content, o.project, o.created_at, o.observation_type, o.scope
@@ -753,10 +767,17 @@ impl Database {
              JOIN observations o ON o.id = observations_fts.rowid
              WHERE observations_fts MATCH ?1
              AND o.deleted_at IS NULL
+             AND (?2 IS NULL OR o.project = ?2)
+             AND (?3 IS NULL OR o.scope = ?3)
              ORDER BY rank
-             LIMIT ?2",
+             LIMIT ?4",
         )?;
-        let rows = stmt.query_map(params![query, limit], |row| {
+        let sanitized = Self::sanitize_fts_query(query);
+        let scope_int = scope.and_then(|s| match s {
+            "personal" => Some(1u8),
+            _ => Some(0u8),
+        });
+        let rows = stmt.query_map(params![sanitized, project, scope_int, limit], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "title": row.get::<_, String>(1)?,
@@ -805,8 +826,8 @@ impl Database {
         let conn = self.get_conn();
         let cutoff = Timestamp::now().0 - (older_than_days * 86400);
         let count = conn.execute(
-            "UPDATE observations SET deleted_at = ?1 WHERE deleted_at IS NULL AND created_at < ?2",
-            params![Timestamp::now().0, cutoff],
+            "UPDATE observations SET deleted_at = ?1 WHERE deleted_at IS NULL AND created_at < ?1",
+            params![cutoff],
         )?;
         if count > 0 {
             db_info!(
@@ -827,68 +848,7 @@ impl Database {
     }
 }
 
-fn row_to_observation(row: &rusqlite::Row) -> rusqlite::Result<Observation> {
-    Ok(Observation {
-        id: ObservationId::new(row.get(0)?),
-        sync_id: SyncId(row.get::<_, String>(1)?),
-        session_id: SessionId::new(row.get::<_, String>(2)?),
-        project: row.get(3)?,
-        observation_type: {
-            let v: u8 = row.get(4)?;
-            match v {
-                1 => ObservationType::ToolUse,
-                2 => ObservationType::FileChange,
-                3 => ObservationType::Command,
-                4 => ObservationType::FileRead,
-                5 => ObservationType::Search,
-                6 => ObservationType::Decision,
-                7 => ObservationType::Architecture,
-                8 => ObservationType::Bugfix,
-                9 => ObservationType::Pattern,
-                10 => ObservationType::Config,
-                11 => ObservationType::Discovery,
-                12 => ObservationType::Learning,
-                _ => ObservationType::Manual,
-            }
-        },
-        title: row.get(5)?,
-        content: row.get(6)?,
-        tool_name: row.get(7)?,
-        scope: {
-            let v: u8 = row.get(8)?;
-            if v == 1 {
-                Scope::Personal
-            } else {
-                Scope::Project
-            }
-        },
-        topic_key: row.get(9)?,
-        content_hash: {
-            let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
-            let mut arr = [0u8; 32];
-            let len = hash_bytes.len().min(32);
-            arr[..len].copy_from_slice(&hash_bytes[..len]);
-            ContentHash(arr)
-        },
-        revision_count: row.get(11)?,
-        duplicate_count: row.get(12)?,
-        last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
-        created_at: Timestamp(row.get(14)?),
-        updated_at: Timestamp(row.get(15)?),
-        deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
-        integrity_hash: row.get(17)?,
-        classification: {
-            let v: u8 = row.get(18)?;
-            match v {
-                1 => Classification::Internal,
-                2 => Classification::Confidential,
-                3 => Classification::Secret,
-                4 => Classification::TopSecret,
-                _ => Classification::Public,
-            }
-        },
-    })
-}
+
 
 impl StoragePort for Database {
     fn init(&self) -> Result<()> {
@@ -903,7 +863,6 @@ impl StoragePort for Database {
             )
             .unwrap_or(0);
         if version < 1 {
-            conn.execute_batch("DROP TABLE IF EXISTS observations").ok();
             conn.execute("INSERT INTO _schema_version (version) VALUES (1)", [])
                 .ok();
         }
@@ -988,7 +947,8 @@ impl StoragePort for Database {
 
     fn search_observations(&self, params: &SearchParams) -> Result<Vec<SearchResult>> {
         let conn = self.get_conn();
-        let search_term = format!("%{}%", params.query);
+        let escaped = params.query.replace("%", r"\%").replace("_", r"\_");
+        let search_term = format!("%{}%", escaped);
         let mut stmt = conn.prepare(
             "SELECT id, sync_id, session_id, project, observation_type, title, content, tool_name, scope, topic_key, content_hash, revision_count, duplicate_count, last_seen_at, created_at, updated_at, deleted_at, integrity_hash, classification
              FROM observations WHERE deleted_at IS NULL AND (title LIKE ?1 OR content LIKE ?1) ORDER BY created_at DESC LIMIT ?2"
@@ -1172,10 +1132,10 @@ impl SessionPort for Database {
             Ok(SessionSummary {
                 id: SessionId::new(row.get::<_, String>(0)?),
                 project: row.get(1)?,
-                started_at: Timestamp(row.get(3)?),
-                ended_at: row.get::<_, Option<i64>>(4)?.map(Timestamp),
-                summary: row.get(5)?,
-                observation_count: row.get(6)?,
+                started_at: Timestamp(row.get(2)?),
+                ended_at: row.get::<_, Option<i64>>(3)?.map(Timestamp),
+                summary: row.get(4)?,
+                observation_count: row.get(5)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
