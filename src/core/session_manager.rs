@@ -174,8 +174,6 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_session_lifecycle() {
         // Test would require actual DB connection

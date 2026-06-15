@@ -2,7 +2,7 @@
 
 use synapsis::infrastructure::context::{
     AccessLevel, Context, ContextId, ContextMetrics, ContextRef, ContextRegistry, ContextState,
-    ContextType, ContextValue, IsolationConfig, Priority, SearchResult,
+    ContextType, ContextValue, Priority,
 };
 
 #[test]

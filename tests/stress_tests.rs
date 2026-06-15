@@ -5,9 +5,6 @@
 #[cfg(test)]
 mod tests {
     use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-    use std::thread;
-    use std::time::Duration;
-    use synapsis::core::*;
     use synapsis::domain::*;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -90,7 +87,7 @@ mod tests {
         let mut handles = vec![];
 
         for _ in 0..50 {
-            let mut obs = base_obs.clone();
+            let obs = base_obs.clone();
             let storage = storage.clone();
             let counter = counter.clone();
             let ids = unique_ids.clone();

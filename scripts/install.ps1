@@ -1,30 +1,27 @@
+#!/usr/bin/env pwsh
 # Synapsis Installer - Windows (PowerShell)
 # Pure Rust - No Python dependencies
 param(
-    [string]$Version = "0.3.0"
+    [string]$Version = "0.7.0",
+    [string]$InstallDir = "$env:LOCALAPPDATA\synapsis"
 )
 
 $Repo = "methodwhite/synapsis"
-$InstallDir = "$env:USERPROFILE\.local\bin"
-$DataDir = "$env:USERPROFILE\.local\share\synapsis"
+$DataDir = "$env:LOCALAPPDATA\synapsis\data"
 
 Write-Host "Synapsis v$Version Installer (Windows)" -ForegroundColor Cyan
-Write-Host "========================================"
+Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Detect architecture
-$Arch = (Get-WmiObject Win32_Processor).Architecture
-switch ($Arch) {
-    9 { $Target = "x86_64-pc-windows-msvc" }
-    5 { $Target = "aarch64-pc-windows-msvc" }
-    default { 
-        Write-Host "Unsupported CPU architecture: $Arch" -ForegroundColor Red
-        Write-Host "Install Rust from https://rustup.rs and build from source."
-        exit 1
-    }
+$Arch = $env:PROCESSOR_ARCHITECTURE
+$Target = switch ($Arch) {
+    "AMD64"  { "x86_64-pc-windows-msvc" }
+    "ARM64"  { "aarch64-pc-windows-msvc" }
+    default { Write-Error "Unsupported architecture: $Arch"; exit 1 }
 }
 
-Write-Host "Platform: Windows ($Target)"
+Write-Host "Platform: Windows ($Arch) -> $Target"
 Write-Host "Install dir: $InstallDir"
 Write-Host "Data dir: $DataDir"
 Write-Host ""
@@ -33,48 +30,65 @@ Write-Host ""
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 
-# Download URL
+# Download pre-built binary
 $DownloadUrl = "https://github.com/$Repo/releases/download/v$Version/synapsis-$Target.zip"
-$TempFile = "$env:TEMP\synapsis-$Version.zip"
+$TempDir = "$env:TEMP\synapsis-install"
 
 try {
     Write-Host "Downloading synapsis v$Version for $Target..."
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempFile -ErrorAction Stop
-    
-    Write-Host "Extracting..."
-    Expand-Archive -Path $TempFile -DestinationPath "$env:TEMP\synapsis-extract" -Force
-    
-    Copy-Item "$env:TEMP\synapsis-extract\synapsis\synapsis.exe" "$InstallDir\synapsis.exe" -Force -ErrorAction SilentlyContinue
-    Copy-Item "$env:TEMP\synapsis-extract\synapsis\synapsis-mcp.exe" "$InstallDir\synapsis-mcp.exe" -Force -ErrorAction SilentlyContinue
-    
-    Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
-    Remove-Item "$env:TEMP\synapsis-extract" -Recurse -Force -ErrorAction SilentlyContinue
-    
+    New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+
+    $ZipPath = "$TempDir\synapsis.zip"
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipPath -ErrorAction Stop
+
+    Expand-Archive -Path $ZipPath -DestinationPath "$TempDir\extracted" -Force
+
+    # Copy binaries
+    Copy-Item "$TempDir\extracted\synapsis.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
+    Copy-Item "$TempDir\extracted\synapsis-mcp.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
+    Copy-Item "$TempDir\extracted\synapsis-server.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
+
     Write-Host ""
     Write-Host "Synapsis v$Version installed successfully!" -ForegroundColor Green
-}
-catch {
-    Write-Host "Download failed. Build from source:" -ForegroundColor Yellow
-    Write-Host "  1. Install Rust: https://rustup.rs"
-    Write-Host "  2. git clone https://github.com/$Repo.git"
-    Write-Host "  3. cd synapsis && cargo build --release"
-    Write-Host "  4. Copy target/release/synapsis.exe to $InstallDir"
-    exit 1
+    & "$InstallDir\synapsis.exe" --version
+    exit 0
+} catch {
+    Write-Host "No pre-built binary found. Building from source..." -ForegroundColor Yellow
+    Write-Host "Requires: Rust (https://rustup.rs) and Visual Studio Build Tools"
 }
 
-# Add to PATH
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$InstallDir*") {
+# Check Rust
+$RustInstalled = Get-Command rustc -ErrorAction SilentlyContinue
+if (-not $RustInstalled) {
+    Write-Host "Installing Rust..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri "https://win.rustup.rs" -OutFile "$TempDir\rustup-init.exe"
+    Start-Process -Wait -FilePath "$TempDir\rustup-init.exe" -ArgumentList "-y"
+    $env:Path += ";$env:USERPROFILE\.cargo\bin"
+}
+
+Write-Host "Building from source..." -ForegroundColor Yellow
+$BuildDir = "$TempDir\source"
+Remove-Item -Recurse -Force $BuildDir -ErrorAction SilentlyContinue
+git clone --depth 1 "https://github.com/$Repo.git" $BuildDir
+
+Set-Location $BuildDir
+cargo build --release
+
+Copy-Item "target\release\synapsis.exe" "$InstallDir\" -Force
+Copy-Item "target\release\synapsis-mcp.exe" "$InstallDir\" -Force
+Copy-Item "target\release\synapsis-server.exe" "$InstallDir\" -Force
+
+Write-Host ""
+Write-Host "Synapsis built and installed from source!" -ForegroundColor Green
+& "$InstallDir\synapsis.exe" --version
+
+# PATH check
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPath -notlike "*$InstallDir*") {
     Write-Host ""
-    Write-Host "Adding $InstallDir to PATH..."
-    [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
-    $env:Path = "$env:Path;$InstallDir"
+    Write-Host "Add to your PATH (re-run terminal after):" -ForegroundColor Yellow
+    Write-Host "  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$InstallDir', 'User')"
 }
 
 Write-Host ""
-Write-Host "Done! Run 'synapsis mcp' to start the MCP server."
-Write-Host "Run 'synapsis update' to check for updates."
-Write-Host ""
-Write-Host "Configure your IDE MCP client:"
-Write-Host "  command: $InstallDir\synapsis.exe"
-Write-Host '  args: ["mcp"]'
+Write-Host "Done!" -ForegroundColor Green
