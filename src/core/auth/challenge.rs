@@ -12,8 +12,11 @@
 //! 4. Server verifies response
 //! ```
 
+use crate::core::lock_utils::*;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -36,13 +39,19 @@ impl Challenge {
 pub struct ChallengeResponse {
     challenges: Arc<RwLock<HashMap<String, Challenge>>>,
     challenge_ttl_secs: u64,
+    failed_attempts: Arc<RwLock<HashMap<String, u32>>>,
+    max_failed_per_agent: u32,
 }
+
+const DEFAULT_MAX_FAILED: u32 = 5;
 
 impl ChallengeResponse {
     pub fn new() -> Self {
         Self {
             challenges: Arc::new(RwLock::new(HashMap::new())),
             challenge_ttl_secs: 300,
+            failed_attempts: Arc::new(RwLock::new(HashMap::new())),
+            max_failed_per_agent: DEFAULT_MAX_FAILED,
         }
     }
 
@@ -50,6 +59,8 @@ impl ChallengeResponse {
         Self {
             challenges: Arc::new(RwLock::new(HashMap::new())),
             challenge_ttl_secs: ttl_secs,
+            failed_attempts: Arc::new(RwLock::new(HashMap::new())),
+            max_failed_per_agent: DEFAULT_MAX_FAILED,
         }
     }
 
@@ -72,7 +83,7 @@ impl ChallengeResponse {
         };
 
         {
-            let mut challenges = self.challenges.write().unwrap();
+            let mut challenges = self.challenges.write_safe();
             challenges.insert(id.clone(), challenge.clone());
         }
 
@@ -80,7 +91,7 @@ impl ChallengeResponse {
     }
 
     pub fn get_challenge(&self, challenge_id: &str) -> Option<Challenge> {
-        let challenges = self.challenges.read().unwrap();
+        let challenges = self.challenges.read_safe();
         challenges.get(challenge_id).cloned()
     }
 
@@ -90,7 +101,19 @@ impl ChallengeResponse {
         response: &str,
         verifier: &dyn ResponseVerifier,
     ) -> Result<bool, ChallengeError> {
-        let mut challenges = self.challenges.write().unwrap();
+        let agent_type = {
+            let challenges = self.challenges.read_safe();
+            challenges.get(challenge_id).map(|c| c.agent_type.clone())
+        };
+
+        if let Some(ref agent) = agent_type {
+            let failed = self.failed_attempts.read_safe();
+            if failed.get(agent).copied().unwrap_or(0) >= self.max_failed_per_agent {
+                return Err(ChallengeError::RateLimited);
+            }
+        }
+
+        let mut challenges = self.challenges.write_safe();
 
         let challenge = challenges
             .get_mut(challenge_id)
@@ -106,7 +129,13 @@ impl ChallengeResponse {
 
         if verifier.verify(&challenge.nonce, response)? {
             challenge.verified = true;
+            self.failed_attempts.write_safe().remove(&agent_type.unwrap_or_default());
             return Ok(true);
+        }
+
+        if let Some(agent) = agent_type {
+            let mut failed = self.failed_attempts.write_safe();
+            *failed.entry(agent).or_insert(0) += 1;
         }
 
         Ok(false)
@@ -121,7 +150,7 @@ impl ChallengeResponse {
         let result = self.verify_response(challenge_id, response, verifier)?;
 
         if result {
-            let mut challenges = self.challenges.write().unwrap();
+            let mut challenges = self.challenges.write_safe();
             challenges.remove(challenge_id);
         }
 
@@ -129,7 +158,7 @@ impl ChallengeResponse {
     }
 
     pub fn is_verified(&self, challenge_id: &str) -> bool {
-        let challenges = self.challenges.read().unwrap();
+        let challenges = self.challenges.read_safe();
         challenges
             .get(challenge_id)
             .map(|c| c.verified)
@@ -138,7 +167,7 @@ impl ChallengeResponse {
 
     pub fn cleanup_expired(&self) -> usize {
         let _now = current_timestamp();
-        let mut challenges = self.challenges.write().unwrap();
+        let mut challenges = self.challenges.write_safe();
         let initial_len = challenges.len();
 
         challenges.retain(|_, c| !c.is_expired());
@@ -147,12 +176,12 @@ impl ChallengeResponse {
     }
 
     pub fn revoke_challenge(&self, challenge_id: &str) -> bool {
-        let mut challenges = self.challenges.write().unwrap();
+        let mut challenges = self.challenges.write_safe();
         challenges.remove(challenge_id).is_some()
     }
 
     pub fn revoke_all_for_agent(&self, agent_type: &str) -> usize {
-        let mut challenges = self.challenges.write().unwrap();
+        let mut challenges = self.challenges.write_safe();
         let initial_len = challenges.len();
 
         challenges.retain(|_, c| c.agent_type != agent_type);
@@ -193,25 +222,18 @@ impl ResponseVerifier for HmacVerifier {
 }
 
 pub struct ApiKeyVerifier {
-    api_keys: HashMap<String, String>,
+    valid_keys: Vec<String>,
 }
 
 impl ApiKeyVerifier {
-    pub fn new(api_keys: HashMap<String, String>) -> Self {
-        Self { api_keys }
+    pub fn new(valid_keys: Vec<String>) -> Self {
+        Self { valid_keys }
     }
 }
 
 impl ResponseVerifier for ApiKeyVerifier {
-    fn verify(&self, nonce: &str, response: &str) -> Result<bool, ChallengeError> {
-        if let Some(secret) = self.api_keys.get(response) {
-            let expected = compute_hmac_sha256(secret.as_bytes(), nonce.as_bytes());
-            let expected_b64 = BASE64.encode(&expected);
-
-            Ok(constant_time_compare(&expected_b64, response))
-        } else {
-            Ok(false)
-        }
+    fn verify(&self, _nonce: &str, response: &str) -> Result<bool, ChallengeError> {
+        Ok(self.valid_keys.iter().any(|k| k == response))
     }
 }
 
@@ -251,7 +273,7 @@ impl ChallengeResponseBuilder {
         self
     }
 
-    pub fn with_api_key_verifier(mut self, api_keys: HashMap<String, String>) -> Self {
+    pub fn with_api_key_verifier(mut self, api_keys: Vec<String>) -> Self {
         self.verifiers.push(Box::new(ApiKeyVerifier::new(api_keys)));
         self
     }
@@ -278,6 +300,7 @@ pub enum ChallengeError {
     ChallengeExpired,
     AlreadyVerified,
     VerificationFailed,
+    RateLimited,
     CryptoError(String),
 }
 
@@ -288,6 +311,7 @@ impl std::fmt::Display for ChallengeError {
             ChallengeError::ChallengeExpired => write!(f, "Challenge has expired"),
             ChallengeError::AlreadyVerified => write!(f, "Challenge already verified"),
             ChallengeError::VerificationFailed => write!(f, "Response verification failed"),
+            ChallengeError::RateLimited => write!(f, "Rate limited: too many failed attempts"),
             ChallengeError::CryptoError(e) => write!(f, "Crypto error: {}", e),
         }
     }
@@ -308,16 +332,7 @@ fn generate_nonce(len: usize) -> Result<String, ChallengeError> {
 }
 
 fn fill_random(dest: &mut [u8]) {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-
-    for (i, byte) in dest.iter_mut().enumerate() {
-        let val = seed.wrapping_mul(i as u64 + 1).wrapping_mul(1103515245);
-        *byte = ((val >> 16) ^ val) as u8;
-    }
+    getrandom::getrandom(dest).unwrap();
 }
 
 fn hex_encode(data: &[u8]) -> String {
@@ -325,170 +340,9 @@ fn hex_encode(data: &[u8]) -> String {
 }
 
 fn compute_hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let block_size = 64;
-    let mut key_block = vec![0u8; block_size];
-
-    if key.len() > block_size {
-        for (i, byte) in key.iter().enumerate().take(block_size) {
-            key_block[i] = *byte;
-        }
-    } else {
-        key_block[..key.len()].copy_from_slice(key);
-    }
-
-    let mut inner_pad = vec![0x36u8; block_size];
-    let mut outer_pad = vec![0x5cu8; block_size];
-
-    for i in 0..block_size {
-        inner_pad[i] ^= key_block[i];
-        outer_pad[i] ^= key_block[i];
-    }
-
-    let inner_data: Vec<u8> = inner_pad.iter().chain(data.iter()).cloned().collect();
-    let inner_hash = sha256_simple(&inner_data);
-
-    let outer_data: Vec<u8> = outer_pad.iter().chain(inner_hash.iter()).cloned().collect();
-    sha256_simple(&outer_data)
-}
-
-fn sha256_simple(data: &[u8]) -> Vec<u8> {
-    let h = [
-        0x6a09e667u32,
-        0xbb67ae85u32,
-        0x3c6ef372u32,
-        0xa54ff53au32,
-        0x510e527fu32,
-        0x9b05688cu32,
-        0x1f83d9abu32,
-        0x5be0cd19u32,
-    ];
-
-    let k = [
-        0x428a2f98u32,
-        0x71374491u32,
-        0xb5c0fbcfu32,
-        0xe9b5dba5u32,
-        0x3956c25bu32,
-        0x59f111f1u32,
-        0x923f82a4u32,
-        0xab1c5ed5u32,
-        0xd807aa98u32,
-        0x12835b01u32,
-        0x243185beu32,
-        0x550c7dc3u32,
-        0x72be5d74u32,
-        0x80deb1feu32,
-        0x9bdc06a7u32,
-        0xc19bf174u32,
-        0xe49b69c1u32,
-        0xefbe4786u32,
-        0x0fc19dc6u32,
-        0x240ca1ccu32,
-        0x2de92c6fu32,
-        0x4a7484aau32,
-        0x5cb0a9dcu32,
-        0x76f988dau32,
-        0x983e5152u32,
-        0xa831c66du32,
-        0xb00327c8u32,
-        0xbf597fc7u32,
-        0xc6e00bf3u32,
-        0xd5a79147u32,
-        0x06ca6351u32,
-        0x14292967u32,
-        0x27b70a85u32,
-        0x2e1b2138u32,
-        0x4d2c6dfcu32,
-        0x53380d13u32,
-        0x650a7354u32,
-        0x766a0abbu32,
-        0x81c2c92eu32,
-        0x92722c85u32,
-        0xa2bfe8a1u32,
-        0xa81a664bu32,
-        0xc24b8b70u32,
-        0xc76c51a3u32,
-        0xd192e819u32,
-        0xd6990624u32,
-        0xf40e3585u32,
-        0x106aa070u32,
-        0x19a4c116u32,
-        0x1e376c08u32,
-        0x2748774cu32,
-        0x34b0bcb5u32,
-        0x391c0cb3u32,
-        0x4ed8aa4au32,
-        0x5b9cca4fu32,
-        0x682e6ff3u32,
-        0x748f82eeu32,
-        0x78a5636fu32,
-        0x84c87814u32,
-        0x8cc70208u32,
-        0x90befffau32,
-        0xa4506cebu32,
-        0xbef9a3f7u32,
-        0xc67178f2u32,
-    ];
-
-    let mut w = [0u32; 64];
-
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..16 {
-        let offset = i * 4;
-        w[i] = u32::from_be_bytes([
-            data[offset],
-            data[offset + 1],
-            data[offset + 2],
-            data[offset + 3],
-        ]);
-    }
-
-    for i in 16..64 {
-        let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-        let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-        w[i] = w[i - 16]
-            .wrapping_add(s0)
-            .wrapping_add(w[i - 7])
-            .wrapping_add(s1);
-    }
-
-    let mut a = h[0];
-    let mut b = h[1];
-    let mut c = h[2];
-    let mut d = h[3];
-    let mut e = h[4];
-    let mut f = h[5];
-    let mut g = h[6];
-    let mut hh = h[7];
-
-    for i in 0..64 {
-        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-        let ch = (e & f) ^ ((!e) & g);
-        let temp1 = hh
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(k[i])
-            .wrapping_add(w[i]);
-        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let temp2 = s0.wrapping_add(maj);
-
-        hh = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(temp1);
-        d = c;
-        c = b;
-        b = a;
-        a = temp1.wrapping_add(temp2);
-    }
-
-    let mut result = Vec::with_capacity(32);
-    for (i, val) in [a, b, c, d, e, f, g, hh].iter().enumerate() {
-        result.extend_from_slice(&val.wrapping_add(h[i]).to_be_bytes());
-    }
-
-    result
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key length");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
 }
 
 fn constant_time_compare(a: &str, b: &str) -> bool {

@@ -9,6 +9,7 @@
 //! - Master key auto-generation
 //! - Key rotation support
 
+use crate::core::lock_utils::*;
 use aes_gcm::{
     aead::{Aead, Nonce},
     Aes256Gcm, Key, KeyInit,
@@ -16,6 +17,7 @@ use aes_gcm::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use getrandom::getrandom;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -139,7 +141,7 @@ impl SecureVault {
         if master_key_path.exists() {
             let data = std::fs::read(&master_key_path)?;
             if let Ok(master) = serde_json::from_slice::<MasterKey>(&data) {
-                let mut mk = self.master_key.write().unwrap();
+                let mut mk = self.master_key.write_safe();
                 *mk = Some(master);
             }
         } else {
@@ -148,7 +150,7 @@ impl SecureVault {
             std::fs::create_dir_all(&self.data_dir)?;
             std::fs::write(&master_key_path, data)?;
 
-            let mut mk = self.master_key.write().unwrap();
+            let mut mk = self.master_key.write_safe();
             *mk = Some(master);
         }
 
@@ -156,7 +158,7 @@ impl SecureVault {
         if entries_path.exists() {
             let data = std::fs::read_to_string(&entries_path)?;
             if let Ok(entries) = serde_json::from_str::<HashMap<String, VaultEntry>>(&data) {
-                let mut e = self.entries.write().unwrap();
+                let mut e = self.entries.write_safe();
                 *e = entries;
             }
         }
@@ -199,7 +201,7 @@ impl SecureVault {
         };
 
         {
-            let mut entries = self.entries.write().unwrap();
+            let mut entries = self.entries.write_safe();
             entries.insert(session_id.to_string(), entry);
         }
 
@@ -210,7 +212,7 @@ impl SecureVault {
 
     pub fn get_session_key(&self, session_id: &str) -> Result<Option<SessionKey>, VaultError> {
         let entry = {
-            let entries = self.entries.read().unwrap();
+            let entries = self.entries.read_safe();
             entries.get(session_id).cloned()
         };
 
@@ -220,7 +222,7 @@ impl SecureVault {
 
                 let mac_key = derive_mac_key(&encryption_key);
 
-                let mut entries = self.entries.write().unwrap();
+                let mut entries = self.entries.write_safe();
                 if let Some(entry) = entries.get_mut(session_id) {
                     entry.last_used = current_timestamp();
                 }
@@ -243,7 +245,7 @@ impl SecureVault {
         let new_key = Self::generate_session_key()?;
 
         let entry = {
-            let mut entries = self.entries.write().unwrap();
+            let mut entries = self.entries.write_safe();
 
             if let Some(e) = entries.get_mut(session_id) {
                 e.rotation_count += 1;
@@ -257,7 +259,7 @@ impl SecureVault {
         let encrypted_key = self.encrypt_key(&new_key.encryption_key)?;
 
         {
-            let mut entries = self.entries.write().unwrap();
+            let mut entries = self.entries.write_safe();
             if let Some(e) = entries.get_mut(session_id) {
                 e.encrypted_key = encrypted_key;
             }
@@ -270,7 +272,7 @@ impl SecureVault {
 
     pub fn close_session(&self, session_id: &str) -> bool {
         let removed = {
-            let mut entries = self.entries.write().unwrap();
+            let mut entries = self.entries.write_safe();
             entries.remove(session_id).is_some()
         };
 
@@ -282,7 +284,7 @@ impl SecureVault {
     }
 
     pub fn list_sessions(&self) -> Vec<(String, String, i64)> {
-        let entries = self.entries.read().unwrap();
+        let entries = self.entries.read_safe();
         entries
             .iter()
             .map(|(id, e)| (id.clone(), e.key_fingerprint.clone(), e.last_used))
@@ -355,7 +357,7 @@ impl SecureVault {
     }
 
     fn encrypt_data(&self, plaintext: &[u8]) -> Result<Vec<u8>, VaultError> {
-        let master_key = self.master_key.read().unwrap();
+        let master_key = self.master_key.read_safe();
         let mk = master_key.as_ref().ok_or(VaultError::NotInitialized)?;
         if mk.key.len() != 32 {
             return Err(VaultError::InvalidKeyLength);
@@ -377,7 +379,7 @@ impl SecureVault {
         if ciphertext.len() < 12 {
             return Err(VaultError::DecryptionFailed);
         }
-        let master_key = self.master_key.read().unwrap();
+        let master_key = self.master_key.read_safe();
         let mk = master_key.as_ref().ok_or(VaultError::NotInitialized)?;
         if mk.key.len() != 32 {
             return Err(VaultError::InvalidKeyLength);
@@ -397,7 +399,7 @@ impl SecureVault {
 
     fn save_entries(&self) -> Result<(), VaultError> {
         let entries_path = self.data_dir.join("vault_entries.json");
-        let entries = self.entries.read().unwrap();
+        let entries = self.entries.read_safe();
         let data = serde_json::to_string_pretty(&*entries)?;
         std::fs::write(entries_path, data)?;
         Ok(())
@@ -428,10 +430,15 @@ impl SecureVault {
         let mut deleted = 0;
 
         let sessions_to_remove: Vec<String> = {
-            let entries = self.entries.read().unwrap();
+            let entries = self.entries.read_safe();
             entries
                 .iter()
-                .filter(|(_, e)| e.last_used + 86400 < now)
+                .filter(|(_, e)| {
+                    let ttl_expired = e.last_used + 86400 < now;
+                    let key = self.get_session_key(&e.session_id).ok().flatten();
+                    let expires = key.and_then(|k| k.expires_at);
+                    ttl_expired || expires.map(|exp| now > exp).unwrap_or(false)
+                })
                 .map(|(id, _)| id.clone())
                 .collect()
         };
@@ -484,74 +491,30 @@ impl From<serde_json::Error> for VaultError {
 }
 
 fn compute_hash(data: &[u8]) -> Vec<u8> {
-    let h = [0x6a09e667u32, 0xbb67ae85u32, 0x3c6ef372u32, 0xa54ff53au32];
-
-    let mut hash = [0u32; 4];
-    for (i, val) in h.iter().enumerate() {
-        hash[i] = *val;
-    }
-
-    for chunk in data.chunks(64) {
-        let mut w = [0u32; 16];
-
-        for (i, bytes) in chunk.chunks(4).enumerate() {
-            if bytes.len() == 4 {
-                w[i] = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            }
-        }
-
-        for i in 0..16 {
-            hash[i % 4] = hash[i % 4].wrapping_add(w[i]);
-        }
-    }
-
-    let mut result = Vec::with_capacity(16);
-    for val in hash.iter() {
-        result.extend_from_slice(&val.to_be_bytes());
-    }
-    result
+    Sha256::digest(data).to_vec()
 }
 
 #[allow(dead_code)]
 fn compute_hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut inner_pad = [0x36u8; 64];
-    let mut outer_pad = [0x5cu8; 64];
-
-    for i in 0..64.min(key.len()) {
-        inner_pad[i] ^= key[i];
-        outer_pad[i] ^= key[i];
-    }
-
-    let inner_data: Vec<u8> = inner_pad.iter().chain(data.iter()).cloned().collect();
-    let inner_hash = compute_hash(&inner_data);
-
-    let outer_data: Vec<u8> = outer_pad.iter().chain(inner_hash.iter()).cloned().collect();
-    compute_hash(&outer_data)
+    use hmac::Mac;
+    let mut mac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key)
+        .expect("HMAC accepts any key length");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
 }
 
 fn derive_mac_key(encryption_key: &[u8]) -> Vec<u8> {
-    let mut mac_key = vec![0u8; 32];
-    for (i, byte) in mac_key.iter_mut().enumerate() {
-        *byte = encryption_key[i % 32].wrapping_add(0x5a);
-    }
-    compute_hash(&mac_key)
+    use hmac::Mac;
+    let mut mac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(encryption_key)
+        .expect("HMAC accepts any key length");
+    mac.update(b"synapsis-mac-key-derivation");
+    mac.finalize().into_bytes().to_vec()
 }
 
 #[allow(dead_code)]
 fn generate_nonce(len: usize) -> Vec<u8> {
     let mut nonce = vec![0u8; len];
-    if let Err(_e) = getrandom::getrandom(&mut nonce) {
-        // Fallback to weak randomness if getrandom fails (should not happen)
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        for (i, byte) in nonce.iter_mut().enumerate() {
-            let val = seed.wrapping_mul(i as u64 + 1).wrapping_mul(1103515245);
-            *byte = ((val >> 16) ^ val) as u8;
-        }
-    }
+    getrandom::getrandom(&mut nonce).expect("getrandom failed");
     nonce
 }
 

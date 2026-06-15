@@ -11,6 +11,7 @@
 //!
 //! Supports TOTP-based MFA as backup when TPM is not available.
 
+use crate::core::lock_utils::*;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use getrandom::getrandom;
 use serde::{Deserialize, Serialize};
@@ -181,12 +182,12 @@ impl TpmMfaProvider {
         let backup_codes = Self::generate_backup_codes();
 
         {
-            let mut secrets = self.mfa_secrets.write().unwrap();
+            let mut secrets = self.mfa_secrets.write_safe();
             secrets.insert(device_id.to_string(), secret.clone());
         }
 
         {
-            let mut codes = self.mfa_backup_codes.write().unwrap();
+            let mut codes = self.mfa_backup_codes.write_safe();
             codes.insert(device_id.to_string(), backup_codes.clone());
         }
 
@@ -216,7 +217,7 @@ impl TpmMfaProvider {
 
     pub fn verify_totp(&self, device_id: &str, code: &str) -> Result<bool, TpmError> {
         let secret = {
-            let secrets = self.mfa_secrets.read().unwrap();
+            let secrets = self.mfa_secrets.read_safe();
             secrets.get(device_id).cloned()
         };
 
@@ -237,7 +238,7 @@ impl TpmMfaProvider {
     }
 
     pub fn verify_backup_code(&self, device_id: &str, code: &str) -> Result<bool, TpmError> {
-        let mut codes = self.mfa_backup_codes.write().unwrap();
+        let mut codes = self.mfa_backup_codes.write_safe();
 
         if let Some(codes_vec) = codes.get_mut(device_id) {
             if let Some(pos) = codes_vec.iter().position(|c| c == code) {
@@ -250,14 +251,14 @@ impl TpmMfaProvider {
     }
 
     pub fn remove_mfa(&self, device_id: &str) {
-        let mut secrets = self.mfa_secrets.write().unwrap();
-        let mut codes = self.mfa_backup_codes.write().unwrap();
+        let mut secrets = self.mfa_secrets.write_safe();
+        let mut codes = self.mfa_backup_codes.write_safe();
         secrets.remove(device_id);
         codes.remove(device_id);
     }
 
     pub fn has_mfa(&self, device_id: &str) -> bool {
-        let secrets = self.mfa_secrets.read().unwrap();
+        let secrets = self.mfa_secrets.read_safe();
         secrets.contains_key(device_id)
     }
 
@@ -289,14 +290,14 @@ impl TpmMfaProvider {
 
         let expiry = current_timestamp() + 300;
 
-        let mut store = self.nonce_store.write().unwrap();
+        let mut store = self.nonce_store.write_safe();
         store.insert(session_id.to_string(), (nonce_b64.clone(), expiry));
 
         nonce_b64
     }
 
     pub fn verify_challenge(&self, session_id: &str, nonce: &str) -> Result<bool, TpmError> {
-        let store = self.nonce_store.read().unwrap();
+        let store = self.nonce_store.read_safe();
 
         if let Some((stored_nonce, expiry)) = store.get(session_id) {
             if current_timestamp() > *expiry {
@@ -311,7 +312,7 @@ impl TpmMfaProvider {
     }
 
     pub fn clear_challenge(&self, session_id: &str) {
-        let mut store = self.nonce_store.write().unwrap();
+        let mut store = self.nonce_store.write_safe();
         store.remove(session_id);
     }
 }

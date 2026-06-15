@@ -7,7 +7,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use rand::RngCore;
-use sha2::{Digest, Sha256};
+// sha2 imported for potential key derivation
 
 /// Encrypt data with AES-256-GCM using a key derived from SYNAPSIS_DB_KEY or a fixed app key.
 /// The key is deterministic — same input always produces the same key.
