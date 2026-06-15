@@ -2,6 +2,7 @@
 //! Implements: SYNAPSIS-2026-006 mitigation
 //! Algorithm: Token Bucket with per-session tracking
 
+use crate::core::lock_utils::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -27,7 +28,7 @@ impl RateLimiter {
     }
 
     pub fn check(&self, session_id: &str) -> Result<(), RateLimitError> {
-        let mut buckets = self.buckets.lock().unwrap();
+        let mut buckets = self.buckets.lock_safe();
         let now = Instant::now();
 
         let bucket = buckets
@@ -52,7 +53,7 @@ impl RateLimiter {
     }
 
     pub fn cleanup_old_buckets(&self, max_age: Duration) {
-        let mut buckets = self.buckets.lock().unwrap();
+        let mut buckets = self.buckets.lock_safe();
         let now = Instant::now();
         buckets.retain(|_, bucket| now.duration_since(bucket.last_refill) < max_age);
     }

@@ -3,6 +3,7 @@
 //! Runs an autonomous daemon that manages agents, tasks, and workers
 //! with various levels of proactiveness based on the configured mode.
 
+use crate::core::lock_utils::*;
 use crate::core::orchestrator::{Orchestrator, AgentStatus, Task as OrchTask, TaskStatus};
 use crate::core::worker::{WorkerRegistry, WorkerAgent, Task, TaskResult, TaskError};
 use std::sync::{Arc, Mutex};
@@ -126,7 +127,7 @@ impl YoloDaemon {
 
     pub fn start(&self) {
         if self.config.enabled {
-            *self.running.lock().unwrap() = true;
+            *self.running.lock_safe() = true;
             let config = self.config.clone();
             let orchestrator = Arc::clone(&self.orchestrator);
             let worker_registry = Arc::clone(&self.worker_registry);
@@ -163,7 +164,7 @@ impl YoloDaemon {
         loop {
             scan_interval.tick().await;
 
-            if !*running.lock().unwrap() {
+            if !*running.lock_safe() {
                 break;
             }
 
@@ -189,7 +190,7 @@ impl YoloDaemon {
                 }
             }
 
-            *last_scan.lock().unwrap() = Instant::now();
+            *last_scan.lock_safe() = Instant::now();
         }
     }
 
@@ -235,7 +236,7 @@ impl YoloDaemon {
             for agent in &idle_agents {
                 if task.required_skills.iter().any(|s| agent.skills.contains(s)) {
                     if orchestrator.assign_task(&task.id, &agent.id) {
-                        let mut workers = active_workers.lock().unwrap();
+                        let mut workers = active_workers.lock_safe();
                         if let Some(w) = workers.iter_mut().find(|w| w.id == agent.id) {
                             w.current_task = Some(task.id.clone());
                         }
@@ -245,7 +246,7 @@ impl YoloDaemon {
             }
         }
 
-        let mut pending = pending_tasks.lock().unwrap();
+        let mut pending = pending_tasks.lock_safe();
         pending.retain(|t| t.assigned_to.is_some() || t.retry_count < 3);
     }
 
@@ -253,7 +254,7 @@ impl YoloDaemon {
         pending_tasks: &Arc<Mutex<Vec<PendingTask>>>,
         orchestrator: &Arc<Orchestrator>,
     ) {
-        let mut pending = pending_tasks.lock().unwrap();
+        let mut pending = pending_tasks.lock_safe();
         for task in pending.iter_mut() {
             if task.retry_count < 3 {
                 task.retry_count += 1;
@@ -276,7 +277,7 @@ impl YoloDaemon {
         auto_heal: bool,
         _max_workers: usize,
     ) {
-        let mut workers = active_workers.lock().unwrap();
+        let mut workers = active_workers.lock_safe();
 
         for worker in workers.iter_mut() {
             let is_alive = worker_registry.get(&worker.id)
@@ -309,7 +310,7 @@ impl YoloDaemon {
             .map(|_| true)
             .unwrap_or(false);
 
-        let mut workers = active_workers.lock().unwrap();
+        let mut workers = active_workers.lock_safe();
         let current_count = workers.len();
 
         if pending && current_count < max_workers {
@@ -330,25 +331,25 @@ impl YoloDaemon {
         active_workers: &Arc<Mutex<Vec<WorkerInfo>>>,
     ) {
         let _tasks = orchestrator.get_pending_tasks();
-        let _workers = active_workers.lock().unwrap();
-        let _pending = pending_tasks.lock().unwrap();
+        let _workers = active_workers.lock_safe();
+        let _pending = pending_tasks.lock_safe();
     }
 
     pub fn stop(&self) {
-        *self.running.lock().unwrap() = false;
+        *self.running.lock_safe() = false;
     }
 
     pub fn is_running(&self) -> bool {
-        *self.running.lock().unwrap()
+        *self.running.lock_safe()
     }
 
     pub fn get_status(&self) -> YoloDaemonStatus {
         YoloDaemonStatus {
             running: self.is_running(),
             mode: self.config.mode,
-            active_workers: self.active_workers.lock().unwrap().len(),
-            pending_tasks: self.pending_tasks.lock().unwrap().len(),
-            last_scan: *self.last_scan.lock().unwrap(),
+            active_workers: self.active_workers.lock_safe().len(),
+            pending_tasks: self.pending_tasks.lock_safe().len(),
+            last_scan: *self.last_scan.lock_safe(),
         }
     }
 
@@ -364,7 +365,7 @@ impl YoloDaemon {
             assigned_to: None,
         };
 
-        self.pending_tasks.lock().unwrap().push(pending);
+        self.pending_tasks.lock_safe().push(pending);
 
         if let Some(agent) = self.orchestrator.find_best_agent(&skills) {
             let _ = self.orchestrator.assign_task(&task_id, &agent);
@@ -374,7 +375,7 @@ impl YoloDaemon {
     }
 
     pub fn queue_task(&self, task: PendingTask) {
-        self.pending_tasks.lock().unwrap().push(task);
+        self.pending_tasks.lock_safe().push(task);
     }
 
     pub fn spawn_worker(&self, worker_type: String) -> String {
@@ -389,7 +390,7 @@ impl YoloDaemon {
             current_task: None,
         };
 
-        self.active_workers.lock().unwrap().push(worker_info);
+        self.active_workers.lock_safe().push(worker_info);
         id
     }
 }

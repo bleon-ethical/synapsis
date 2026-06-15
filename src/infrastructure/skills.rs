@@ -3,6 +3,7 @@
 //! Skill registry and management system for AI agents.
 //! Skills are reusable capabilities that can be activated/deactivated.
 
+use crate::core::lock_utils::*;
 use crate::core::uuid::Uuid;
 use crate::domain::types::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -198,7 +199,7 @@ impl SkillRegistry {
         if skills_file.exists() {
             if let Ok(data) = std::fs::read_to_string(&skills_file) {
                 if let Ok(skills) = serde_json::from_str::<HashMap<SkillId, Skill>>(&data) {
-                    *self.skills.write().unwrap() = skills;
+                    *self.skills.write_safe() = skills;
                 }
             }
         }
@@ -207,7 +208,7 @@ impl SkillRegistry {
         if activations_file.exists() {
             if let Ok(data) = std::fs::read_to_string(&activations_file) {
                 if let Ok(acts) = serde_json::from_str::<Vec<SkillActivation>>(&data) {
-                    *self.activations.write().unwrap() = acts;
+                    *self.activations.write_safe() = acts;
                 }
             }
         }
@@ -217,7 +218,7 @@ impl SkillRegistry {
 
     fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::Relaxed);
-        let elapsed = self.last_save.lock().unwrap().elapsed();
+        let elapsed = self.last_save.lock_safe().elapsed();
         if elapsed >= std::time::Duration::from_millis(500) {
             let _ = self.flush();
         }
@@ -225,7 +226,7 @@ impl SkillRegistry {
 
     pub fn flush(&self) -> std::io::Result<()> {
         if self.dirty.swap(false, Ordering::Relaxed) {
-            *self.last_save.lock().unwrap() = Instant::now();
+            *self.last_save.lock_safe() = Instant::now();
             self.save()
         } else {
             Ok(())
@@ -236,13 +237,13 @@ impl SkillRegistry {
         std::fs::create_dir_all(&self.data_dir)?;
 
         let skills_file = self.data_dir.join("skills.json");
-        let skills = self.skills.read().unwrap();
+        let skills = self.skills.read_safe();
         let data = serde_json::to_string_pretty(&*skills)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(skills_file, data)?;
 
         let activations_file = self.data_dir.join("activations.json");
-        let activations = self.activations.read().unwrap();
+        let activations = self.activations.read_safe();
         let data = serde_json::to_string_pretty(&*activations)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(activations_file, data)?;
@@ -252,19 +253,19 @@ impl SkillRegistry {
 
     pub fn register(&self, skill: Skill) -> SkillId {
         let id = skill.id.clone();
-        self.skills.write().unwrap().insert(id.clone(), skill);
+        self.skills.write_safe().insert(id.clone(), skill);
         self.mark_dirty();
         id
     }
 
     pub fn unregister(&self, id: &SkillId) -> Option<Skill> {
-        let skill = self.skills.write().unwrap().remove(id);
+        let skill = self.skills.write_safe().remove(id);
         self.mark_dirty();
         skill
     }
 
     pub fn get(&self, id: &SkillId) -> Option<Skill> {
-        self.skills.read().unwrap().get(id).cloned()
+        self.skills.read_safe().get(id).cloned()
     }
 
     pub fn get_by_name(&self, name: &str) -> Option<Skill> {
@@ -277,7 +278,7 @@ impl SkillRegistry {
     }
 
     pub fn list(&self, category: Option<SkillCategory>) -> Vec<Skill> {
-        let skills = self.skills.read().unwrap();
+        let skills = self.skills.read_safe();
         match category {
             Some(cat) => skills
                 .values()
@@ -305,7 +306,7 @@ impl SkillRegistry {
     }
 
     pub fn enable(&self, id: &SkillId) -> bool {
-        if let Some(skill) = self.skills.write().unwrap().get_mut(id) {
+        if let Some(skill) = self.skills.write_safe().get_mut(id) {
             skill.enabled = true;
             skill.updated_at = Timestamp::now();
             self.mark_dirty();
@@ -316,7 +317,7 @@ impl SkillRegistry {
     }
 
     pub fn disable(&self, id: &SkillId) -> bool {
-        if let Some(skill) = self.skills.write().unwrap().get_mut(id) {
+        if let Some(skill) = self.skills.write_safe().get_mut(id) {
             skill.enabled = false;
             skill.updated_at = Timestamp::now();
             self.mark_dirty();
@@ -333,7 +334,7 @@ impl SkillRegistry {
         session_id: Option<String>,
         context: &str,
     ) -> Option<SkillActivation> {
-        if !self.skills.read().unwrap().contains_key(skill_id) {
+        if !self.skills.read_safe().contains_key(skill_id) {
             return None;
         }
 
@@ -342,7 +343,7 @@ impl SkillRegistry {
         activation.session_id = session_id;
         activation.context = context.to_string();
 
-        self.activations.write().unwrap().push(activation.clone());
+        self.activations.write_safe().push(activation.clone());
         self.mark_dirty();
 
         Some(activation)
@@ -354,7 +355,7 @@ impl SkillRegistry {
         success: bool,
         error: Option<String>,
     ) -> bool {
-        let mut activations = self.activations.write().unwrap();
+        let mut activations = self.activations.write_safe();
         if let Some(act) = activations.iter_mut().find(|a| a.id == *activation_id) {
             act.deactivate(success, error);
             drop(activations);
@@ -366,7 +367,7 @@ impl SkillRegistry {
     }
 
     pub fn get_activations(&self, limit: usize) -> Vec<SkillActivation> {
-        let activations = self.activations.read().unwrap();
+        let activations = self.activations.read_safe();
         activations.iter().rev().take(limit).cloned().collect()
     }
 
@@ -380,7 +381,7 @@ impl SkillRegistry {
     }
 
     pub fn count(&self) -> usize {
-        self.skills.read().unwrap().len()
+        self.skills.read_safe().len()
     }
 }
 

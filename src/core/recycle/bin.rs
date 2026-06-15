@@ -2,6 +2,7 @@
 //!
 //! Stores recycled messages with intelligent categorization and search.
 
+use crate::core::lock_utils::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -115,7 +116,7 @@ impl RecycleBin {
         if bin_path.exists() {
             let data = std::fs::read_to_string(&bin_path)?;
             if let Ok(entries) = serde_json::from_str::<HashMap<String, RecycledEntry>>(&data) {
-                let mut entries_guard = self.entries.write().unwrap();
+                let mut entries_guard = self.entries.write_safe();
                 *entries_guard = entries;
 
                 self.rebuild_indexes()?;
@@ -127,32 +128,32 @@ impl RecycleBin {
 
     pub fn save(&self) -> Result<(), std::io::Error> {
         let bin_path = self.data_dir.join("recycle_bin.json");
-        let entries = self.entries.read().unwrap();
+        let entries = self.entries.read_safe();
         let data = serde_json::to_string_pretty(&*entries)?;
         std::fs::write(bin_path, data)
     }
 
     fn rebuild_indexes(&self) -> Result<(), std::io::Error> {
-        let entries = self.entries.read().unwrap();
+        let entries = self.entries.read_safe();
 
         {
-            let mut by_keyword = self.by_keyword.write().unwrap();
+            let mut by_keyword = self.by_keyword.write_safe();
             *by_keyword = HashMap::new();
         }
         {
-            let mut by_category = self.by_category.write().unwrap();
+            let mut by_category = self.by_category.write_safe();
             *by_category = HashMap::new();
         }
         {
-            let mut by_task = self.by_task.write().unwrap();
+            let mut by_task = self.by_task.write_safe();
             *by_task = HashMap::new();
         }
         {
-            let mut by_agent = self.by_agent.write().unwrap();
+            let mut by_agent = self.by_agent.write_safe();
             *by_agent = HashMap::new();
         }
         {
-            let mut by_time = self.by_time.write().unwrap();
+            let mut by_time = self.by_time.write_safe();
             *by_time = BinaryHeap::new();
         }
 
@@ -169,7 +170,7 @@ impl RecycleBin {
         entry: &RecycledEntry,
     ) -> Result<(), std::io::Error> {
         {
-            let mut by_keyword = self.by_keyword.write().unwrap();
+            let mut by_keyword = self.by_keyword.write_safe();
             for keyword in &entry.keywords {
                 by_keyword
                     .entry(keyword.clone())
@@ -179,7 +180,7 @@ impl RecycleBin {
         }
 
         {
-            let mut by_category = self.by_category.write().unwrap();
+            let mut by_category = self.by_category.write_safe();
             by_category
                 .entry(entry.category)
                 .or_default()
@@ -187,7 +188,7 @@ impl RecycleBin {
         }
 
         if let Some(ref task_id) = entry.task_id {
-            let mut by_task = self.by_task.write().unwrap();
+            let mut by_task = self.by_task.write_safe();
             by_task
                 .entry(task_id.clone())
                 .or_default()
@@ -195,7 +196,7 @@ impl RecycleBin {
         }
 
         {
-            let mut by_agent = self.by_agent.write().unwrap();
+            let mut by_agent = self.by_agent.write_safe();
             by_agent
                 .entry(entry.agent_fingerprint.clone())
                 .or_default()
@@ -203,7 +204,7 @@ impl RecycleBin {
         }
 
         {
-            let mut by_time = self.by_time.write().unwrap();
+            let mut by_time = self.by_time.write_safe();
             by_time.push((entry.created_at, id.to_string()));
         }
 
@@ -216,7 +217,7 @@ impl RecycleBin {
 
     fn remove_from_indexes(&self, id: &str, entry: &RecycledEntry) {
         {
-            let mut by_keyword = self.by_keyword.write().unwrap();
+            let mut by_keyword = self.by_keyword.write_safe();
             for keyword in &entry.keywords {
                 if let Some(ids) = by_keyword.get_mut(keyword) {
                     ids.remove(id);
@@ -228,21 +229,21 @@ impl RecycleBin {
         }
 
         {
-            let mut by_category = self.by_category.write().unwrap();
+            let mut by_category = self.by_category.write_safe();
             if let Some(ids) = by_category.get_mut(&entry.category) {
                 ids.remove(id);
             }
         }
 
         if let Some(ref task_id) = entry.task_id {
-            let mut by_task = self.by_task.write().unwrap();
+            let mut by_task = self.by_task.write_safe();
             if let Some(ids) = by_task.get_mut(task_id) {
                 ids.remove(id);
             }
         }
 
         {
-            let mut by_agent = self.by_agent.write().unwrap();
+            let mut by_agent = self.by_agent.write_safe();
             if let Some(ids) = by_agent.get_mut(&entry.agent_fingerprint) {
                 ids.remove(id);
             }
@@ -288,7 +289,7 @@ impl RecycleBin {
         };
 
         {
-            let mut entries = self.entries.write().unwrap();
+            let mut entries = self.entries.write_safe();
             entries.insert(id.clone(), entry.clone());
         }
 
@@ -304,7 +305,7 @@ impl RecycleBin {
     }
 
     pub fn get(&self, id: &str) -> Option<RecycledEntry> {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write_safe();
 
         if let Some(entry) = entries.get_mut(id) {
             entry.access_count += 1;
@@ -319,7 +320,7 @@ impl RecycleBin {
         let mut first = true;
 
         for keyword in &query.keywords {
-            let by_keyword = self.by_keyword.read().unwrap();
+            let by_keyword = self.by_keyword.read_safe();
             if let Some(ids) = by_keyword.get(keyword) {
                 if first {
                     candidate_ids = ids.clone();
@@ -338,12 +339,12 @@ impl RecycleBin {
         }
 
         if query.keywords.is_empty() {
-            let entries = self.entries.read().unwrap();
+            let entries = self.entries.read_safe();
             candidate_ids = entries.keys().cloned().collect();
         }
 
         if let Some(ref task_id) = query.task_id {
-            let by_task = self.by_task.read().unwrap();
+            let by_task = self.by_task.read_safe();
             if let Some(ids) = by_task.get(task_id) {
                 if first {
                     candidate_ids = ids.clone();
@@ -355,7 +356,7 @@ impl RecycleBin {
         }
 
         if let Some(ref fingerprint) = query.agent_fingerprint {
-            let by_agent = self.by_agent.read().unwrap();
+            let by_agent = self.by_agent.read_safe();
             if let Some(ids) = by_agent.get(fingerprint) {
                 if first {
                     candidate_ids = ids.clone();
@@ -365,7 +366,7 @@ impl RecycleBin {
             }
         }
 
-        let entries = self.entries.read().unwrap();
+        let entries = self.entries.read_safe();
         let now = current_timestamp();
 
         let mut results: Vec<RecycledEntry> = entries
@@ -417,7 +418,7 @@ impl RecycleBin {
 
     pub fn delete(&self, id: &str) -> bool {
         let entry = {
-            let mut entries = self.entries.write().unwrap();
+            let mut entries = self.entries.write_safe();
             entries.remove(id)
         };
 
@@ -435,7 +436,7 @@ impl RecycleBin {
         let mut deleted = 0;
 
         let ids_to_delete: Vec<String> = {
-            let entries = self.entries.read().unwrap();
+            let entries = self.entries.read_safe();
             entries
                 .iter()
                 .filter(|(_, e)| e.is_expired(now) && !e.should_never_delete())
@@ -454,7 +455,7 @@ impl RecycleBin {
 
     pub fn cleanup_category(&self, category: MessageCategory) -> usize {
         let ids: Vec<String> = {
-            let by_category = self.by_category.read().unwrap();
+            let by_category = self.by_category.read_safe();
             by_category
                 .get(&category)
                 .map(|ids| ids.iter().cloned().collect())
@@ -472,7 +473,7 @@ impl RecycleBin {
     }
 
     pub fn stats(&self) -> RecycleStats {
-        let entries = self.entries.read().unwrap();
+        let entries = self.entries.read_safe();
         let now = current_timestamp();
 
         let mut by_category = HashMap::new();
@@ -523,31 +524,31 @@ impl RecycleBin {
 
     pub fn clear(&self) -> usize {
         let count = {
-            let entries = self.entries.read().unwrap();
+            let entries = self.entries.read_safe();
             entries.len()
         };
 
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write_safe();
         entries.clear();
 
         {
-            let mut by_keyword = self.by_keyword.write().unwrap();
+            let mut by_keyword = self.by_keyword.write_safe();
             by_keyword.clear();
         }
         {
-            let mut by_category = self.by_category.write().unwrap();
+            let mut by_category = self.by_category.write_safe();
             by_category.clear();
         }
         {
-            let mut by_task = self.by_task.write().unwrap();
+            let mut by_task = self.by_task.write_safe();
             by_task.clear();
         }
         {
-            let mut by_agent = self.by_agent.write().unwrap();
+            let mut by_agent = self.by_agent.write_safe();
             by_agent.clear();
         }
         {
-            let mut by_time = self.by_time.write().unwrap();
+            let mut by_time = self.by_time.write_safe();
             *by_time = BinaryHeap::new();
         }
 

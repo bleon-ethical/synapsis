@@ -2,6 +2,7 @@
 //!
 //! Intelligently categorizes messages based on content analysis and rules.
 
+use crate::core::lock_utils::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 // use std::collections::HashMap;
@@ -207,7 +208,7 @@ impl SmartCategorizer {
     }
 
     pub fn add_rule(&self, rule: CategorizationRule) {
-        let mut rules = self.custom_rules.write().unwrap();
+        let mut rules = self.custom_rules.write_safe();
         rules.push(rule);
     }
 
@@ -224,7 +225,7 @@ impl SmartCategorizer {
     }
 
     pub fn remove_rule(&self, description: &str) -> bool {
-        let mut rules = self.custom_rules.write().unwrap();
+        let mut rules = self.custom_rules.write_safe();
         let len_before = rules.len();
         rules.retain(|r| r.description != description);
         rules.len() != len_before
@@ -242,7 +243,7 @@ impl SmartCategorizer {
         let mut reasons = Vec::new();
 
         let custom_rules: Vec<CategorizationRule> = {
-            let guard = self.custom_rules.read().unwrap();
+            let guard = self.custom_rules.read_safe();
             guard.iter().cloned().collect()
         };
         let all_rules: Vec<&CategorizationRule> =
@@ -327,7 +328,7 @@ impl SmartCategorizer {
     }
 
     pub fn get_rules(&self) -> Vec<(String, MessageCategory, i32)> {
-        let custom = self.custom_rules.read().unwrap();
+        let custom = self.custom_rules.read_safe();
         let mut rules: Vec<(String, MessageCategory, i32)> = self
             .rules
             .iter()

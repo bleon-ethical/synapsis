@@ -4,6 +4,7 @@
 //! roles and capabilities. Synapsis manages agent definitions, states,
 //! communication, and coordination.
 
+use crate::core::lock_utils::*;
 use crate::core::uuid::Uuid;
 use crate::domain::types::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -339,7 +340,7 @@ impl AgentRegistry {
         if agents_file.exists() {
             if let Ok(data) = std::fs::read_to_string(&agents_file) {
                 if let Ok(agents) = serde_json::from_str::<HashMap<AgentId, Agent>>(&data) {
-                    *self.agents.write().unwrap() = agents;
+                    *self.agents.write_safe() = agents;
                 }
             }
         }
@@ -348,7 +349,7 @@ impl AgentRegistry {
         if tasks_file.exists() {
             if let Ok(data) = std::fs::read_to_string(&tasks_file) {
                 if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(&data) {
-                    *self.tasks.write().unwrap() = tasks;
+                    *self.tasks.write_safe() = tasks;
                 }
             }
         }
@@ -359,7 +360,7 @@ impl AgentRegistry {
     fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::Relaxed);
         // Debounce: only save if at least 500ms since last save
-        let elapsed = self.last_save.lock().unwrap().elapsed();
+        let elapsed = self.last_save.lock_safe().elapsed();
         if elapsed >= std::time::Duration::from_millis(500) {
             let _ = self.flush();
         }
@@ -367,7 +368,7 @@ impl AgentRegistry {
 
     pub fn flush(&self) -> std::io::Result<()> {
         if self.dirty.swap(false, Ordering::Relaxed) {
-            *self.last_save.lock().unwrap() = Instant::now();
+            *self.last_save.lock_safe() = Instant::now();
             self.save()
         } else {
             Ok(())
@@ -378,13 +379,13 @@ impl AgentRegistry {
         std::fs::create_dir_all(&self.data_dir)?;
 
         let agents_file = self.data_dir.join("agents.json");
-        let agents = self.agents.read().unwrap();
+        let agents = self.agents.read_safe();
         let data = serde_json::to_string_pretty(&*agents)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(agents_file, data)?;
 
         let tasks_file = self.data_dir.join("tasks.json");
-        let tasks = self.tasks.read().unwrap();
+        let tasks = self.tasks.read_safe();
         let data = serde_json::to_string_pretty(&*tasks)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(tasks_file, data)?;
@@ -394,19 +395,19 @@ impl AgentRegistry {
 
     pub fn register(&self, agent: Agent) -> AgentId {
         let id = agent.id.clone();
-        self.agents.write().unwrap().insert(id.clone(), agent);
-        self.flush();
+        self.agents.write_safe().insert(id.clone(), agent);
+        let _ = self.flush();
         id
     }
 
     pub fn unregister(&self, id: &AgentId) -> Option<Agent> {
-        let agent = self.agents.write().unwrap().remove(id);
-        self.flush();
+        let agent = self.agents.write_safe().remove(id);
+        let _ = self.flush();
         agent
     }
 
     pub fn get(&self, id: &AgentId) -> Option<Agent> {
-        self.agents.read().unwrap().get(id).cloned()
+        self.agents.read_safe().get(id).cloned()
     }
 
     pub fn get_by_name(&self, name: &str) -> Option<Agent> {
@@ -419,7 +420,7 @@ impl AgentRegistry {
     }
 
     pub fn list(&self, role: Option<AgentRole>) -> Vec<Agent> {
-        let agents = self.agents.read().unwrap();
+        let agents = self.agents.read_safe();
         match role {
             Some(r) => agents.values().filter(|a| a.role == r).cloned().collect(),
             None => agents.values().cloned().collect(),
@@ -427,7 +428,7 @@ impl AgentRegistry {
     }
 
     pub fn update_state(&self, id: &AgentId, state: AgentState) -> bool {
-        if let Some(agent) = self.agents.write().unwrap().get_mut(id) {
+        if let Some(agent) = self.agents.write_safe().get_mut(id) {
             agent.state = state;
             if state == AgentState::Working {
                 agent.update_activity();
@@ -446,15 +447,15 @@ impl AgentRegistry {
         content: String,
         msg_type: MessageType,
     ) -> Option<MessageId> {
-        if !self.agents.read().unwrap().contains_key(&from)
-            || !self.agents.read().unwrap().contains_key(&to)
+        if !self.agents.read_safe().contains_key(&from)
+            || !self.agents.read_safe().contains_key(&to)
         {
             return None;
         }
 
         let msg = AgentMessage::new(from, to, content, msg_type);
         let id = msg.id.clone();
-        self.messages.write().unwrap().push(msg);
+        self.messages.write_safe().push(msg);
         self.mark_dirty();
         Some(id)
     }
@@ -479,13 +480,13 @@ impl AgentRegistry {
     ) -> TaskId {
         let task = Task::new(title, description, priority);
         let id = task.id.clone();
-        self.tasks.write().unwrap().push(task);
+        self.tasks.write_safe().push(task);
         self.mark_dirty();
         id
     }
 
     pub fn assign_task(&self, task_id: &TaskId, agent_id: &AgentId) -> bool {
-        let mut tasks = self.tasks.write().unwrap();
+        let mut tasks = self.tasks.write_safe();
         if let Some(task) = tasks.iter_mut().find(|t| t.id == *task_id) {
             task.assign(agent_id.clone());
             drop(tasks);
@@ -497,7 +498,7 @@ impl AgentRegistry {
     }
 
     pub fn complete_task(&self, task_id: &TaskId, result: String) -> bool {
-        let mut tasks = self.tasks.write().unwrap();
+        let mut tasks = self.tasks.write_safe();
         if let Some(task) = tasks.iter_mut().find(|t| t.id == *task_id) {
             task.complete(result);
             drop(tasks);
@@ -509,7 +510,7 @@ impl AgentRegistry {
     }
 
     pub fn get_tasks(&self, status: Option<TaskStatus>) -> Vec<Task> {
-        let tasks = self.tasks.read().unwrap();
+        let tasks = self.tasks.read_safe();
         match status {
             Some(s) => tasks.iter().filter(|t| t.status == s).cloned().collect(),
             None => tasks.iter().cloned().collect(),
@@ -517,7 +518,7 @@ impl AgentRegistry {
     }
 
     pub fn count(&self) -> usize {
-        self.agents.read().unwrap().len()
+        self.agents.read_safe().len()
     }
 
     pub fn get_active_count(&self) -> usize {

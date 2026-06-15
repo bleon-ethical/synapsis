@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod antibrick;
 pub mod auth;
+pub mod lock_utils;
 pub mod auto_integrate;
 pub mod concurrency;
 pub mod concurrency_advanced;

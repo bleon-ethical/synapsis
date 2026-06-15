@@ -1,5 +1,6 @@
 //! Git Sync Module
 
+use crate::core::lock_utils::*;
 use crate::domain::*;
 use std::sync::RwLock;
 
@@ -104,7 +105,7 @@ impl GitSyncEngine {
     }
     pub fn sync_memory(&self, memory: &Memory) -> Result<ManifestId> {
         let chunks = self.chunk_content(&memory.content);
-        let mut manifest = self.manifest.write().unwrap();
+        let mut manifest = self.manifest.write_safe();
         manifest.agent_id = memory.agent_id.clone();
         manifest.session_id = memory.session_id.clone();
         manifest.chunks.clear();

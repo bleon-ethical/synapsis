@@ -1,5 +1,6 @@
 //! Advanced Concurrency Primitives
 
+use crate::core::lock_utils::*;
 use std::sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
@@ -29,7 +30,7 @@ impl TimedSpinLock {
         self.lock.try_lock().ok().map(LockGuard)
     }
     pub fn lock(&self) -> LockGuard<'_> {
-        LockGuard(self.lock.lock().unwrap())
+        LockGuard(self.lock.lock_safe())
     }
     pub fn unlock(&self) {}
 }

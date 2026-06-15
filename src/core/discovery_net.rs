@@ -1,6 +1,7 @@
 //! Synapsis Network Discovery — Cognitive Swarm & P2P Brain Sync.
 //! Uses mDNS to find other MethodWhite nodes on the local network.
 
+use crate::core::lock_utils::*;
 use anyhow::Result;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
@@ -57,7 +58,7 @@ impl NetworkDiscovery {
                         .next()
                         .map(|a| a.to_string())
                         .unwrap_or_default();
-                    let mut nodes = nodes.lock().unwrap();
+                    let mut nodes = nodes.lock_safe();
                     println!("[Mesh] Discovered Node: {} @ {}", node_id, ip);
                     nodes.insert(node_id.to_string(), ip);
                 }
@@ -68,6 +69,6 @@ impl NetworkDiscovery {
     }
 
     pub fn list_nodes(&self) -> HashMap<String, String> {
-        self.found_nodes.lock().unwrap().clone()
+        self.found_nodes.lock_safe().clone()
     }
 }

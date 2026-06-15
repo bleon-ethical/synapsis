@@ -1,5 +1,6 @@
 //! Synapsis Event Bus - Push Notifications for Multi-Agent
 
+use crate::core::lock_utils::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -37,19 +38,19 @@ impl EventBus {
     }
 
     pub fn subscribe(&self, session_id: &str, _events: Vec<EventType>) {
-        let mut clients = self.clients.write().unwrap();
+        let mut clients = self.clients.write_safe();
         clients.insert(session_id.to_string(), "subscribed".to_string());
         eprintln!("[EventBus] Client subscribed: {}", &session_id);
     }
 
     pub fn unsubscribe(&self, session_id: &str) {
-        let mut clients = self.clients.write().unwrap();
+        let mut clients = self.clients.write_safe();
         clients.remove(session_id);
         eprintln!("[EventBus] Client unsubscribed: {}", session_id);
     }
 
     pub fn publish(&self, event: Event) {
-        let mut history = self.event_history.write().unwrap();
+        let mut history = self.event_history.write_safe();
         history.push(event.clone());
         if history.len() > 1000 {
             history.remove(0);
@@ -58,7 +59,7 @@ impl EventBus {
     }
 
     pub fn get_history(&self, since: i64) -> Vec<Event> {
-        let history = self.event_history.read().unwrap();
+        let history = self.event_history.read_safe();
         history
             .iter()
             .filter(|e| e.timestamp > since)

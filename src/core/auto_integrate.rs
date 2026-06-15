@@ -1,5 +1,6 @@
 //! Synapsis Auto-Integration - Proactive tool integration
 
+use crate::core::lock_utils::*;
 use crate::core::discovery::{DiscoveredTool, DiscoveryScan, EnvironmentDiscovery, ToolType};
 use crate::core::tool_registry::{ToolRegistryState, WorkerConfig};
 use crate::domain::types::Timestamp;
@@ -131,7 +132,7 @@ impl AutoIntegrate {
             if should_auto_enable && tool.auto_integrate {
                 registry.register(tool.clone());
 
-                let worker_config = registry.0.read().unwrap().get_worker_config(&tool);
+                let worker_config = registry.0.read_safe().get_worker_config(&tool);
                 if config.emit_events {
                     Self::emit_event(
                         registry,
@@ -197,14 +198,14 @@ impl AutoIntegrate {
             ));
         }
 
-        let registry = self.registry.0.write().unwrap();
+        let registry = self.registry.0.write_safe();
         let config = registry.get_worker_config(tool);
 
         Ok(config)
     }
 
     pub fn register_with_task_queue(&self, config: &WorkerConfig) -> Result<()> {
-        let mut registry = self.registry.0.write().unwrap();
+        let mut registry = self.registry.0.write_safe();
         registry.register_worker(config.clone());
         Ok(())
     }

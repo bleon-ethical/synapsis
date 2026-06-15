@@ -24,6 +24,7 @@
 //! Apply security rules -> AgentClass
 //! ```
 
+use crate::core::lock_utils::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -252,7 +253,7 @@ impl AgentClassifier {
         if registry_path.exists() {
             let data = std::fs::read_to_string(&registry_path)?;
             if let Ok(registry) = serde_json::from_str::<HashMap<String, DeviceRecord>>(&data) {
-                let mut reg = self.device_registry.write().unwrap();
+                let mut reg = self.device_registry.write_safe();
                 *reg = registry;
             }
         }
@@ -261,23 +262,23 @@ impl AgentClassifier {
 
     pub fn save_registry(&self, data_dir: &Path) -> Result<(), std::io::Error> {
         let registry_path = data_dir.join("device_registry.json");
-        let reg = self.device_registry.read().unwrap();
+        let reg = self.device_registry.read_safe();
         let data = serde_json::to_string_pretty(&*reg)?;
         std::fs::write(registry_path, data)
     }
 
     pub fn register_device(&self, record: DeviceRecord) {
-        let mut reg = self.device_registry.write().unwrap();
+        let mut reg = self.device_registry.write_safe();
         reg.insert(record.device_id.clone(), record);
     }
 
     pub fn get_device(&self, device_id: &str) -> Option<DeviceRecord> {
-        let reg = self.device_registry.read().unwrap();
+        let reg = self.device_registry.read_safe();
         reg.get(device_id).cloned()
     }
 
     pub fn revoke_device(&self, device_id: &str) -> bool {
-        let mut reg = self.device_registry.write().unwrap();
+        let mut reg = self.device_registry.write_safe();
         reg.remove(device_id).is_some()
     }
 
@@ -300,7 +301,7 @@ impl AgentClassifier {
         let mut blocked_reason = None;
 
         let is_known_device =
-            device_id.is_some_and(|id| self.device_registry.read().unwrap().contains_key(id));
+            device_id.is_some_and(|id| self.device_registry.read_safe().contains_key(id));
 
         let is_local = connection_type.is_local();
         let has_dilithium = metadata.has_dilithium_key && metadata.is_dilithium_verified;
@@ -443,7 +444,7 @@ impl AgentClassifier {
 
         match device_id {
             Some(id) => {
-                let reg = self.device_registry.read().unwrap();
+                let reg = self.device_registry.read_safe();
                 !reg.contains_key(id)
             }
             None => true,
