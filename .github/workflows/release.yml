@@ -2,13 +2,9 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Build but do not publish'
-        required: true
-        default: true
-        type: boolean
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -66,9 +62,13 @@ jobs:
           name: synapsis-${{ matrix.target }}
           path: release/synapsis-*
       - name: Upload to release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !inputs.dry_run
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/synapsis-*
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Synapsis ${{ github.ref_name }}" \
+            --notes "See the commit history for details." \
+            release/synapsis-* 2>/dev/null || \
+          gh release upload "${{ github.ref_name }}" \
+            release/synapsis-* --clobber 2>/dev/null || true
