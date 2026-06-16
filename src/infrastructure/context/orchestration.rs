@@ -24,13 +24,14 @@ pub struct TaskId(pub String);
 
 impl TaskId {
     pub fn new() -> Self {
-        Self(format!(
-            "task_{:x}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        Self(format!("task_{:x}_{:x}", ts, seq))
     }
 }
 

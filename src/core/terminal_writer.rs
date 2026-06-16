@@ -16,7 +16,7 @@ pub struct TerminalWriter {
 impl TerminalWriter {
     pub fn new() -> Self {
         Self {
-            message_file: PathBuf::from("/tmp/synapsis-agent-messages.txt"),
+            message_file: std::env::temp_dir().join("synapsis-agent-messages.txt"),
         }
     }
 
@@ -70,7 +70,7 @@ impl TerminalWriter {
         self.write_to_terminal(&message, agent_id)?;
 
         // Also write to prompt-specific file
-        let prompt_file = PathBuf::from("/tmp/synapsis-agent-prompt.txt");
+        let prompt_file = std::env::temp_dir().join("synapsis-agent-prompt.txt");
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
