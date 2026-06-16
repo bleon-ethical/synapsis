@@ -36,7 +36,6 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --release --target ${{ matrix.target }} --bin synapsis --bin synapsis-mcp --bin synapsis-server
-        continue-on-error: ${{ matrix.target == 'x86_64-apple-darwin' }}
       - name: Package (Unix)
         if: runner.os != 'Windows' && success()
         run: |
