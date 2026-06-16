@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub trait MutexSafe<T> {
     fn lock_safe(&self) -> MutexGuard<'_, T>;
@@ -7,12 +7,6 @@ pub trait MutexSafe<T> {
 impl<T> MutexSafe<T> for Mutex<T> {
     fn lock_safe(&self) -> MutexGuard<'_, T> {
         self.lock().unwrap_or_else(|e| e.into_inner())
-    }
-}
-
-impl<T> MutexSafe<T> for Arc<Mutex<T>> {
-    fn lock_safe(&self) -> MutexGuard<'_, T> {
-        self.as_ref().lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -31,12 +25,4 @@ impl<T> RwLockSafe<T> for RwLock<T> {
     }
 }
 
-impl<T> RwLockSafe<T> for Arc<RwLock<T>> {
-    fn read_safe(&self) -> RwLockReadGuard<'_, T> {
-        self.as_ref().read().unwrap_or_else(|e| e.into_inner())
-    }
 
-    fn write_safe(&self) -> RwLockWriteGuard<'_, T> {
-        self.as_ref().write().unwrap_or_else(|e| e.into_inner())
-    }
-}
