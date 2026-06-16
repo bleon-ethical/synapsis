@@ -77,12 +77,10 @@ jobs:
           merge-multiple: true
       - name: Create or update release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           ls -la release/
           gh release create "${{ github.ref_name }}" \
             --title "Synapsis ${{ github.ref_name }}" \
-            --notes "See the commit history for details." \
-            release/*.tar.gz release/*.zip 2>/dev/null || \
-          gh release upload "${{ github.ref_name }}" \
-            release/*.tar.gz release/*.zip --clobber 2>/dev/null || true
+            --generate-notes \
+            release/*.tar.gz release/*.zip
