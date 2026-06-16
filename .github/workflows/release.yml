@@ -42,9 +42,13 @@ jobs:
         run: |
           mkdir -p release/synapsis
           for bin in synapsis synapsis-mcp synapsis-server; do
-            [ -f "target/${{ matrix.target }}/release/$bin" ] && cp "target/${{ matrix.target }}/release/$bin" release/synapsis/ || true
-            strip "release/synapsis/$bin" 2>/dev/null || true
+            src="target/${{ matrix.target }}/release/$bin"
+            if [ -f "$src" ] && [ -s "$src" ]; then
+              cp "$src" release/synapsis/
+              file release/synapsis/"$bin"
+            fi
           done
+          ls -la release/synapsis/
           cp README.md LICENSE release/synapsis/ 2>/dev/null || true
           cd release && tar czf "synapsis-${{ matrix.target }}.tar.gz" synapsis/
       - name: Package (Windows)
