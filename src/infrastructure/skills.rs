@@ -174,10 +174,7 @@ pub struct SkillRegistry {
 
 impl SkillRegistry {
     pub fn new() -> Self {
-        let data_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("synapsis")
-            .join("skills");
+        let data_dir = crate::config::data_dir().join("skills");
         std::fs::create_dir_all(&data_dir).ok();
 
         Self {
@@ -587,17 +584,4 @@ Performance: Partitioning, indexing, compression, query optimization
     }
 }
 
-mod dirs {
-    use std::path::PathBuf;
-    pub fn data_local_dir() -> Option<PathBuf> {
-        std::env::var("XDG_DATA_HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var("HOME")
-                    .ok()
-                    .map(|h| PathBuf::from(h).join(".local/share"))
-            })
-            .or_else(|| std::env::var("APPDATA").ok().map(PathBuf::from))
-    }
-}
+

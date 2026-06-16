@@ -18,8 +18,7 @@ use super::tools;
 
 macro_rules! info_log {
     ($($arg:tt)*) => {{
-        let quiet = std::env::var("SYNAPSIS_QUIET").is_ok() || std::env::var("QUIET").is_ok();
-        if !quiet {
+        if !crate::config::is_quiet() {
             eprintln!($($arg)*);
         }
     }};
@@ -27,7 +26,7 @@ macro_rules! info_log {
 
 macro_rules! debug_log {
     ($($arg:tt)*) => {{
-        if std::env::var("SYNAPSIS_LOG").as_deref() == Ok("debug") {
+        if crate::config::log_level() == "debug" {
             eprintln!($($arg)*);
         }
     }};

@@ -251,7 +251,7 @@ impl Memory {
         role: String,
         content: String,
     ) -> Self {
-        use crate::core::uuid::Uuid;
+        use crate::domain::uuid::Uuid;
         Self {
             id: Uuid::new_v4().to_hex_string(),
             agent_id,

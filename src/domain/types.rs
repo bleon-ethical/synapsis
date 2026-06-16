@@ -1,6 +1,6 @@
 //! Synapsis Domain Types
 
-use crate::core::uuid::Uuid;
+use crate::domain::uuid::Uuid;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 

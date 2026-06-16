@@ -7,6 +7,7 @@ pub mod errors;
 pub mod ports;
 pub mod provider;
 pub mod types;
+pub mod uuid;
 
 pub use entities::*;
 pub use errors::{ErrorKind, Result, SynapsisError};

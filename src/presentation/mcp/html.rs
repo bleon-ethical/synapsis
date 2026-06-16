@@ -217,13 +217,20 @@ pub fn derive_encryption_key() -> [u8; 32] {
             }
         }
     }
-    use sha2::Digest;
-    let host = hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let hash = sha2::Sha256::digest(host.as_bytes());
+    let key_path = crate::config::data_dir().join(".browser_encryption_key");
+    if let Ok(data) = std::fs::read(&key_path) {
+        if data.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&data);
+            return key;
+        }
+    }
     let mut key = [0u8; 32];
-    key.copy_from_slice(&hash);
+    getrandom::getrandom(&mut key).expect("getrandom failed");
+    if let Some(parent) = key_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&key_path, &key);
     key
 }
 

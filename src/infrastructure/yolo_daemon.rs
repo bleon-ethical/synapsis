@@ -136,17 +136,22 @@ impl YoloDaemon {
             let running = Arc::clone(&self.running);
             let last_scan = Arc::clone(&self.last_scan);
 
-            tokio::spawn(async move {
-                Self::run_daemon(
-                    config,
-                    orchestrator,
-                    worker_registry,
-                    active_workers,
-                    pending_tasks,
-                    running,
-                    last_scan,
-                ).await;
-            });
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    Self::run_daemon(
+                        config, orchestrator, worker_registry,
+                        active_workers, pending_tasks, running, last_scan,
+                    ).await;
+                });
+            } else {
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+                    rt.block_on(Self::run_daemon(
+                        config, orchestrator, worker_registry,
+                        active_workers, pending_tasks, running, last_scan,
+                    ));
+                });
+            }
         }
     }
 
@@ -402,22 +407,6 @@ pub struct YoloDaemonStatus {
     pub active_workers: usize,
     pub pending_tasks: usize,
     pub last_scan: Instant,
-}
-
-mod uuid {
-    pub struct Uuid;
-
-    impl Uuid {
-        pub fn new_v4() -> Uuid {
-            Uuid
-        }
-
-        pub fn to_hex_string(&self) -> String {
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
-            (0..16).map(|_| format!("{:02x}", rng.gen::<u8>())).collect()
-        }
-    }
 }
 
 #[cfg(test)]

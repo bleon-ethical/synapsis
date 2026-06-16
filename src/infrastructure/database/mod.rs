@@ -2,8 +2,7 @@
 
 macro_rules! db_info {
     ($($arg:tt)*) => {{
-        let quiet = std::env::var("SYNAPSIS_QUIET").is_ok() || std::env::var("QUIET").is_ok();
-        if !quiet {
+        if !crate::config::is_quiet() {
             eprintln!($($arg)*);
         }
     }};
@@ -686,6 +685,65 @@ impl Default for Database {
     }
 }
 
+fn row_to_observation(row: &rusqlite::Row) -> rusqlite::Result<Observation> {
+    Ok(Observation {
+        id: ObservationId::new(row.get(0)?),
+        sync_id: SyncId(row.get::<_, String>(1)?),
+        session_id: SessionId::new(row.get::<_, String>(2)?),
+        project: row.get(3)?,
+        observation_type: {
+            let v: u8 = row.get(4)?;
+            match v {
+                1 => ObservationType::ToolUse,
+                2 => ObservationType::FileChange,
+                3 => ObservationType::Command,
+                4 => ObservationType::FileRead,
+                5 => ObservationType::Search,
+                6 => ObservationType::Decision,
+                7 => ObservationType::Architecture,
+                8 => ObservationType::Bugfix,
+                9 => ObservationType::Pattern,
+                10 => ObservationType::Config,
+                11 => ObservationType::Discovery,
+                12 => ObservationType::Learning,
+                _ => ObservationType::Manual,
+            }
+        },
+        title: row.get(5)?,
+        content: row.get(6)?,
+        tool_name: row.get(7)?,
+        scope: {
+            let v: u8 = row.get(8)?;
+            if v == 1 { Scope::Personal } else { Scope::Project }
+        },
+        topic_key: row.get(9)?,
+        content_hash: {
+            let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
+            let mut arr = [0u8; 32];
+            let len = hash_bytes.len().min(32);
+            arr[..len].copy_from_slice(&hash_bytes[..len]);
+            ContentHash(arr)
+        },
+        revision_count: row.get(11)?,
+        duplicate_count: row.get(12)?,
+        last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
+        created_at: Timestamp(row.get(14)?),
+        updated_at: Timestamp(row.get(15)?),
+        deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
+        integrity_hash: row.get(17)?,
+        classification: {
+            let v: u8 = row.get(18)?;
+            match v {
+                1 => Classification::Internal,
+                2 => Classification::Confidential,
+                3 => Classification::Secret,
+                4 => Classification::TopSecret,
+                _ => Classification::Public,
+            }
+        },
+    })
+}
+
 impl Database {
     pub fn soft_delete_observation(&self, id: i64) -> Result<()> {
         let conn = self.get_conn();
@@ -876,68 +934,7 @@ impl StoragePort for Database {
             "SELECT id, sync_id, session_id, project, observation_type, title, content, tool_name, scope, topic_key, content_hash, revision_count, duplicate_count, last_seen_at, created_at, updated_at, deleted_at, integrity_hash, classification
              FROM observations WHERE id = ?1 AND deleted_at IS NULL"
         )?;
-        let mut rows = stmt.query_map(rusqlite::params![id.0], |row| {
-            Ok(Observation {
-                id: ObservationId::new(row.get(0)?),
-                sync_id: SyncId(row.get::<_, String>(1)?),
-                session_id: SessionId::new(row.get::<_, String>(2)?),
-                project: row.get(3)?,
-                observation_type: {
-                    let v: u8 = row.get(4)?;
-                    match v {
-                        1 => ObservationType::ToolUse,
-                        2 => ObservationType::FileChange,
-                        3 => ObservationType::Command,
-                        4 => ObservationType::FileRead,
-                        5 => ObservationType::Search,
-                        6 => ObservationType::Decision,
-                        7 => ObservationType::Architecture,
-                        8 => ObservationType::Bugfix,
-                        9 => ObservationType::Pattern,
-                        10 => ObservationType::Config,
-                        11 => ObservationType::Discovery,
-                        12 => ObservationType::Learning,
-                        _ => ObservationType::Manual,
-                    }
-                },
-                title: row.get(5)?,
-                content: row.get(6)?,
-                tool_name: row.get(7)?,
-                scope: {
-                    let v: u8 = row.get(8)?;
-                    if v == 1 {
-                        Scope::Personal
-                    } else {
-                        Scope::Project
-                    }
-                },
-                topic_key: row.get(9)?,
-                content_hash: {
-                    let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
-                    let mut arr = [0u8; 32];
-                    let len = hash_bytes.len().min(32);
-                    arr[..len].copy_from_slice(&hash_bytes[..len]);
-                    ContentHash(arr)
-                },
-                revision_count: row.get(11)?,
-                duplicate_count: row.get(12)?,
-                last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
-                created_at: Timestamp(row.get(14)?),
-                updated_at: Timestamp(row.get(15)?),
-                deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
-                integrity_hash: row.get(17)?,
-                classification: {
-                    let v: u8 = row.get(18)?;
-                    match v {
-                        1 => Classification::Internal,
-                        2 => Classification::Confidential,
-                        3 => Classification::Secret,
-                        4 => Classification::TopSecret,
-                        _ => Classification::Public,
-                    }
-                },
-            })
-        })?;
+        let mut rows = stmt.query_map(rusqlite::params![id.0], row_to_observation)?;
         Ok(rows.next().transpose()?)
     }
 
@@ -953,68 +950,7 @@ impl StoragePort for Database {
             "SELECT id, sync_id, session_id, project, observation_type, title, content, tool_name, scope, topic_key, content_hash, revision_count, duplicate_count, last_seen_at, created_at, updated_at, deleted_at, integrity_hash, classification
              FROM observations WHERE deleted_at IS NULL AND (title LIKE ?1 OR content LIKE ?1) ORDER BY created_at DESC LIMIT ?2"
         )?;
-        let rows = stmt.query_map(rusqlite::params![search_term, params.limit], |row| {
-            Ok(Observation {
-                id: ObservationId::new(row.get(0)?),
-                sync_id: SyncId(row.get::<_, String>(1)?),
-                session_id: SessionId::new(row.get::<_, String>(2)?),
-                project: row.get(3)?,
-                observation_type: {
-                    let v: u8 = row.get(4)?;
-                    match v {
-                        1 => ObservationType::ToolUse,
-                        2 => ObservationType::FileChange,
-                        3 => ObservationType::Command,
-                        4 => ObservationType::FileRead,
-                        5 => ObservationType::Search,
-                        6 => ObservationType::Decision,
-                        7 => ObservationType::Architecture,
-                        8 => ObservationType::Bugfix,
-                        9 => ObservationType::Pattern,
-                        10 => ObservationType::Config,
-                        11 => ObservationType::Discovery,
-                        12 => ObservationType::Learning,
-                        _ => ObservationType::Manual,
-                    }
-                },
-                title: row.get(5)?,
-                content: row.get(6)?,
-                tool_name: row.get(7)?,
-                scope: {
-                    let v: u8 = row.get(8)?;
-                    if v == 1 {
-                        Scope::Personal
-                    } else {
-                        Scope::Project
-                    }
-                },
-                topic_key: row.get(9)?,
-                content_hash: {
-                    let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
-                    let mut arr = [0u8; 32];
-                    let len = hash_bytes.len().min(32);
-                    arr[..len].copy_from_slice(&hash_bytes[..len]);
-                    ContentHash(arr)
-                },
-                revision_count: row.get(11)?,
-                duplicate_count: row.get(12)?,
-                last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
-                created_at: Timestamp(row.get(14)?),
-                updated_at: Timestamp(row.get(15)?),
-                deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
-                integrity_hash: row.get(17)?,
-                classification: {
-                    let v: u8 = row.get(18)?;
-                    match v {
-                        1 => Classification::Internal,
-                        2 => Classification::Confidential,
-                        3 => Classification::Secret,
-                        4 => Classification::TopSecret,
-                        _ => Classification::Public,
-                    }
-                },
-            })
-        })?;
+        let rows = stmt.query_map(rusqlite::params![search_term, params.limit], row_to_observation)?;
         let observations: Vec<Observation> = rows.filter_map(|r| r.ok()).collect();
         Ok(observations
             .into_iter()
@@ -1028,68 +964,7 @@ impl StoragePort for Database {
             "SELECT id, sync_id, session_id, project, observation_type, title, content, tool_name, scope, topic_key, content_hash, revision_count, duplicate_count, last_seen_at, created_at, updated_at, deleted_at, integrity_hash, classification
              FROM observations WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?1"
         )?;
-        let rows = stmt.query_map(rusqlite::params![limit], |row| {
-            Ok(Observation {
-                id: ObservationId::new(row.get(0)?),
-                sync_id: SyncId(row.get::<_, String>(1)?),
-                session_id: SessionId::new(row.get::<_, String>(2)?),
-                project: row.get(3)?,
-                observation_type: {
-                    let v: u8 = row.get(4)?;
-                    match v {
-                        1 => ObservationType::ToolUse,
-                        2 => ObservationType::FileChange,
-                        3 => ObservationType::Command,
-                        4 => ObservationType::FileRead,
-                        5 => ObservationType::Search,
-                        6 => ObservationType::Decision,
-                        7 => ObservationType::Architecture,
-                        8 => ObservationType::Bugfix,
-                        9 => ObservationType::Pattern,
-                        10 => ObservationType::Config,
-                        11 => ObservationType::Discovery,
-                        12 => ObservationType::Learning,
-                        _ => ObservationType::Manual,
-                    }
-                },
-                title: row.get(5)?,
-                content: row.get(6)?,
-                tool_name: row.get(7)?,
-                scope: {
-                    let v: u8 = row.get(8)?;
-                    if v == 1 {
-                        Scope::Personal
-                    } else {
-                        Scope::Project
-                    }
-                },
-                topic_key: row.get(9)?,
-                content_hash: {
-                    let hash_bytes: Vec<u8> = row.get::<_, Vec<u8>>(10).unwrap_or_default();
-                    let mut arr = [0u8; 32];
-                    let len = hash_bytes.len().min(32);
-                    arr[..len].copy_from_slice(&hash_bytes[..len]);
-                    ContentHash(arr)
-                },
-                revision_count: row.get(11)?,
-                duplicate_count: row.get(12)?,
-                last_seen_at: row.get::<_, Option<i64>>(13)?.map(Timestamp),
-                created_at: Timestamp(row.get(14)?),
-                updated_at: Timestamp(row.get(15)?),
-                deleted_at: row.get::<_, Option<i64>>(16)?.map(Timestamp),
-                integrity_hash: row.get(17)?,
-                classification: {
-                    let v: u8 = row.get(18)?;
-                    match v {
-                        1 => Classification::Internal,
-                        2 => Classification::Confidential,
-                        3 => Classification::Secret,
-                        4 => Classification::TopSecret,
-                        _ => Classification::Public,
-                    }
-                },
-            })
-        })?;
+        let rows = stmt.query_map(rusqlite::params![limit], row_to_observation)?;
         let observations: Vec<Observation> = rows.filter_map(|r| r.ok()).collect();
         Ok(observations
             .into_iter()
