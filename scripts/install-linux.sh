@@ -76,5 +76,63 @@ if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
     echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
 fi
 
+# ═══════════════════════════════════════════════════════════════
+# MCP AUTO-CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
+
+MCP_CONFIG='{
+  "mcpServers": {
+    "synapsis": {
+      "command": "synapsis-mcp",
+      "args": []
+    }
+  }
+}'
+
+configured=0
+
+# Claude Code
+if command -v claude &>/dev/null; then
+    CLAUDE_DIR="${HOME}/.claude"
+    mkdir -p "${CLAUDE_DIR}"
+    if [ -f "${CLAUDE_DIR}/settings.json" ]; then
+        # Inject into existing settings
+        tmp=$(mktemp)
+        python3 -c "
+import json
+with open('${CLAUDE_DIR}/settings.json') as f:
+    cfg = json.load(f)
+cfg.setdefault('mcpServers', {})['synapsis'] = {'command': 'synapsis-mcp', 'args': []}
+with open('${CLAUDE_DIR}/settings.json', 'w') as f:
+    json.dump(cfg, f, indent=2)
+" 2>/dev/null && configured=1
+    else
+        echo "${MCP_CONFIG}" > "${CLAUDE_DIR}/settings.json" && configured=1
+    fi
+    [ "$configured" = "1" ] && echo "  ✅ Claude Code configured (~/.claude/settings.json)"
+fi
+
+# Cursor / Windsurf
+for app in cursor windsurf; do
+    CONFIG_DIR="${HOME}/.config/${app}"
+    if [ -d "${CONFIG_DIR}" ] || [ -d "${HOME}/.${app}" ]; then
+        CURSOR_DIR="${HOME}/.config/${app}"
+        mkdir -p "${CURSOR_DIR}"
+        MCP_FILE="${CURSOR_DIR}/mcp.json"
+        if [ ! -f "${MCP_FILE}" ]; then
+            echo "${MCP_CONFIG}" > "${MCP_FILE}" && echo "  ✅ ${app^} configured (${MCP_FILE})"
+        fi
+    fi
+done
+
+# OpenCode
+if command -v opencode &>/dev/null; then
+    OPENCODE_FILE="${HOME}/.opencode.json"
+    if [ ! -f "${OPENCODE_FILE}" ]; then
+        echo "${MCP_CONFIG}" > "${OPENCODE_FILE}" && echo "  ✅ OpenCode configured (~/.opencode.json)"
+    fi
+fi
+
 echo ""
-echo "Done!"
+echo "Done! ${INSTALL_DIR}/synapsis-mcp is ready for MCP."
+echo "To test: echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}' | ${INSTALL_DIR}/synapsis-mcp"
