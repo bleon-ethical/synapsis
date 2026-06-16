@@ -800,11 +800,11 @@ impl Database {
 
 fn sanitize_fts_query(query: &str) -> String {
     let lower = query.to_lowercase();
-    let dangerous = ["or ", "and ", "not ", "near(", "\"", "+", "-"];
-    if dangerous.iter().any(|d| lower.contains(d)) {
+    let blocklist = ["or ", "and ", "not ", "near("];
+    if blocklist.iter().any(|d| lower.contains(d)) {
         let sanitized: String = query
             .chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_')
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_' || *c == '"')
             .collect();
         return sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
     }

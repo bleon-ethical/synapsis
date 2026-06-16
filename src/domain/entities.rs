@@ -252,14 +252,19 @@ impl Memory {
         content: String,
     ) -> Self {
         use crate::domain::uuid::Uuid;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
         Self {
             id: Uuid::new_v4().to_hex_string(),
             agent_id,
             session_id,
             role,
+            token_count: content.split_whitespace().count() as i32,
             content,
-            token_count: 0,
-            created_at: 0,
+            created_at: now as u64,
             checksum: None,
         }
     }
