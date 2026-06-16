@@ -43,11 +43,11 @@ cargo build --release
 ### Linux / macOS
 
 ```bash
-# macOS
-curl -fsSL https://raw.githubusercontent.com/methodwhite/synapsis/main/scripts/install-macos.sh | bash
+# Linux (x86_64 / ARM64)
+curl -fsSL https://raw.githubusercontent.com/methodwhite/synapsis/main/scripts/install-linux.sh | bash
 
-# Linux
-curl -fsSL https://raw.githubusercontent.com/methodwhite/synapsis/main/scripts/install-termux.sh | bash
+# macOS (Intel / Apple Silicon)
+curl -fsSL https://raw.githubusercontent.com/methodwhite/synapsis/main/scripts/install-macos.sh | bash
 ```
 
 ### Windows (PowerShell)
