@@ -1,18 +1,15 @@
 #!/bin/bash
 # Synapsis Installer - macOS (Intel + Apple Silicon)
-# Pure Rust - No Python dependencies
 set -e
 
-VERSION="${SYNAPSIS_VERSION:-0.3.0}"
+VERSION="${SYNAPSIS_VERSION:-0.8.2}"
 REPO="methodwhite/synapsis"
 INSTALL_DIR="${HOME}/.local/bin"
-DATA_DIR="${HOME}/.local/share/synapsis"
 
 echo "Synapsis v${VERSION} Installer (macOS)"
 echo "======================================="
 echo ""
 
-# Detect architecture
 ARCH=$(uname -m)
 case "$ARCH" in
     x86_64)  TARGET="x86_64-apple-darwin" ;;
@@ -22,77 +19,88 @@ esac
 
 echo "Platform: macOS (${ARCH}) -> ${TARGET}"
 echo "Install dir: ${INSTALL_DIR}"
-echo "Data dir: ${DATA_DIR}"
 echo ""
 
-# Create directories
 mkdir -p "${INSTALL_DIR}"
-mkdir -p "${DATA_DIR}"
 
-# Try download pre-built binary
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/v${VERSION}/synapsis-${TARGET}.tar.gz"
+INSTALLED=0
 
+# ── Download ─────────────────────────────────────────────
 if command -v curl &>/dev/null; then
-    echo "Downloading synapsis v${VERSION} for ${TARGET}..."
+    echo "Downloading synapsis v${VERSION}..."
     TMPDIR=$(mktemp -d)
     trap "rm -rf ${TMPDIR}" EXIT
-    
     if curl -fsSL "${DOWNLOAD_URL}" -o "${TMPDIR}/synapsis.tar.gz"; then
-        cd "${TMPDIR}"
-        tar xzf synapsis.tar.gz
-        cp synapsis/synapsis synapsis/synapsis-mcp "${INSTALL_DIR}/" 2>/dev/null || true
-        chmod +x "${INSTALL_DIR}/synapsis" "${INSTALL_DIR}/synapsis-mcp" 2>/dev/null || true
-        
-        # macOS: remove quarantine attribute
-        xattr -d com.apple.quarantine "${INSTALL_DIR}/synapsis" 2>/dev/null || true
-        xattr -d com.apple.quarantine "${INSTALL_DIR}/synapsis-mcp" 2>/dev/null || true
-        
-        echo ""
-        echo "Synapsis v${VERSION} installed successfully!"
-        "${INSTALL_DIR}/synapsis" --version 2>/dev/null || true
-        exit 0
+        tar xzf "${TMPDIR}/synapsis.tar.gz" -C "${TMPDIR}"
+        cp "${TMPDIR}"/synapsis/synapsis* "${INSTALL_DIR}/" 2>/dev/null || true
+        chmod +x "${INSTALL_DIR}"/synapsis* 2>/dev/null || true
+        xattr -d com.apple.quarantine "${INSTALL_DIR}"/synapsis* 2>/dev/null || true
+        INSTALLED=1
     fi
 fi
 
-# Fallback: build from source
-echo "No pre-built binary found. Building from source..."
-echo "Requires: Xcode Command Line Tools + Rust"
-
-# Check Rust
-if ! command -v rustc &>/dev/null; then
-    echo "Installing Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "${HOME}/.cargo/env"
+# ── Build from source ────────────────────────────────────
+if [ "$INSTALLED" = "0" ]; then
+    echo "No pre-built binary found. Building from source..."
+    if ! command -v rustc &>/dev/null; then
+        echo "Installing Rust..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "${HOME}/.cargo/env"
+    fi
+    if ! xcode-select -p &>/dev/null; then
+        echo "Installing Xcode Command Line Tools..."
+        xcode-select --install
+        echo "After Xcode CLI tools install completes, re-run this script."
+        exit 1
+    fi
+    TMPDIR=$(mktemp -d)
+    trap "rm -rf ${TMPDIR}" EXIT
+    git clone --depth 1 "https://github.com/${REPO}.git" "${TMPDIR}/synapsis"
+    cd "${TMPDIR}/synapsis"
+    cargo build --release
+    cp target/release/synapsis target/release/synapsis-mcp target/release/synapsis-server "${INSTALL_DIR}/"
+    chmod +x "${INSTALL_DIR}/synapsis" "${INSTALL_DIR}/synapsis-mcp" "${INSTALL_DIR}/synapsis-server"
+    INSTALLED=1
 fi
 
-# Check Xcode
-if ! xcode-select -p &>/dev/null; then
-    echo "Installing Xcode Command Line Tools..."
-    xcode-select --install
-    echo "After Xcode CLI tools install completes, re-run this script."
-    exit 1
-fi
-
-TMPDIR=$(mktemp -d)
-trap "rm -rf ${TMPDIR}" EXIT
-
-git clone --depth 1 "https://github.com/${REPO}.git" "${TMPDIR}/synapsis"
-cd "${TMPDIR}/synapsis"
-cargo build --release
-
-cp target/release/synapsis target/release/synapsis-mcp "${INSTALL_DIR}/"
-chmod +x "${INSTALL_DIR}/synapsis" "${INSTALL_DIR}/synapsis-mcp"
-
-echo ""
-echo "Synapsis built and installed from source!"
-"${INSTALL_DIR}/synapsis" --version
-
-# PATH check
+# ── PATH check ────────────────────────────────────────────
 if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-    echo ""
-    echo "Add to your shell profile (~/.zshrc or ~/.bash_profile):"
-    echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+    echo "Add to ~/.zshrc or ~/.bash_profile: export PATH=\"${INSTALL_DIR}:\$PATH\""
+fi
+
+# ── MCP auto-config ──────────────────────────────────────
+MCP_CONFIG='{"mcpServers":{"synapsis":{"command":"synapsis-mcp","args":[]}}}'
+
+if command -v claude &>/dev/null; then
+    mkdir -p "${HOME}/.claude" 2>/dev/null
+    CFG="${HOME}/.claude/settings.json"
+    if [ -f "$CFG" ]; then
+        python3 -c "
+import json
+with open('$CFG') as f: c = json.load(f)
+c.setdefault('mcpServers',{})['synapsis'] = {'command':'synapsis-mcp','args':[]}
+with open('$CFG','w') as f: json.dump(c,f,indent=2)
+" 2>/dev/null && echo "  ✅ Claude Code configured" || true
+    else
+        echo "$MCP_CONFIG" > "$CFG" 2>/dev/null && echo "  ✅ Claude Code configured"
+    fi
+fi
+
+for app in cursor windsurf; do
+    for dir in "${HOME}/.config/${app}" "${HOME}/.${app}"; do
+        [ -d "$dir" ] || continue
+        MCPF="${dir}/mcp.json"; [ -f "$MCPF" ] && break
+        echo "$MCP_CONFIG" > "$MCPF" 2>/dev/null && echo "  ✅ ${app^} configured" && break
+    done
+done
+
+if command -v opencode &>/dev/null; then
+    MCPF="${HOME}/.opencode.json"
+    [ ! -f "$MCPF" ] && echo "$MCP_CONFIG" > "$MCPF" 2>/dev/null && echo "  ✅ OpenCode configured"
 fi
 
 echo ""
-echo "Done!"
+echo "✅ Synapsis v${VERSION} installed!"
+echo "   Run: synapsis-mcp"
+exit 0
