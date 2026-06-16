@@ -24,5 +24,3 @@ impl<T> RwLockSafe<T> for RwLock<T> {
         self.write().unwrap_or_else(|e| e.into_inner())
     }
 }
-
-
