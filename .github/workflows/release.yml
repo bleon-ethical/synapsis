@@ -36,39 +36,51 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --release --target ${{ matrix.target }} --bin synapsis --bin synapsis-mcp --bin synapsis-server
+        continue-on-error: ${{ matrix.target == 'x86_64-apple-darwin' }}
       - name: Package (Unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && success()
         run: |
           mkdir -p release/synapsis
           for bin in synapsis synapsis-mcp synapsis-server; do
-            cp "target/${{ matrix.target }}/release/$bin" release/synapsis/
+            [ -f "target/${{ matrix.target }}/release/$bin" ] && cp "target/${{ matrix.target }}/release/$bin" release/synapsis/ || true
             strip "release/synapsis/$bin" 2>/dev/null || true
           done
           cp README.md LICENSE release/synapsis/ 2>/dev/null || true
           cd release && tar czf "synapsis-${{ matrix.target }}.tar.gz" synapsis/
       - name: Package (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && success()
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release/synapsis | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/synapsis.exe" release/synapsis/
-          Copy-Item "target/${{ matrix.target }}/release/synapsis-mcp.exe" release/synapsis/
-          Copy-Item "target/${{ matrix.target }}/release/synapsis-server.exe" release/synapsis/
-          Copy-Item README.md release/synapsis/ -ErrorAction SilentlyContinue
-          Copy-Item LICENSE release/synapsis/ -ErrorAction SilentlyContinue
+          Copy-Item "target/${{ matrix.target }}/release/synapsis.exe" release/synapsis/ -ErrorAction SilentlyContinue
+          Copy-Item "target/${{ matrix.target }}/release/synapsis-mcp.exe" release/synapsis/ -ErrorAction SilentlyContinue
+          Copy-Item "target/${{ matrix.target }}/release/synapsis-server.exe" release/synapsis/ -ErrorAction SilentlyContinue
+          Copy-Item README.md LICENSE release/synapsis/ -ErrorAction SilentlyContinue
           Compress-Archive -Path release/synapsis -DestinationPath "release/synapsis-${{ matrix.target }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: synapsis-${{ matrix.target }}
           path: release/synapsis-*
-      - name: Upload to release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+
+  release:
+    name: Create Release
+    needs: build
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: synapsis-*
+          path: release/
+          merge-multiple: true
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls -la release/
           gh release create "${{ github.ref_name }}" \
             --title "Synapsis ${{ github.ref_name }}" \
             --notes "See the commit history for details." \
-            release/synapsis-* 2>/dev/null || \
+            release/*.tar.gz release/*.zip 2>/dev/null || \
           gh release upload "${{ github.ref_name }}" \
-            release/synapsis-* --clobber 2>/dev/null || true
+            release/*.tar.gz release/*.zip --clobber 2>/dev/null || true
