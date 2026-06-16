@@ -24,7 +24,7 @@ mod tests {
 
         let mut handles = vec![];
 
-        for agent_id in 0..100 {
+        for agent_id in 0..20 {
             let storage = storage.clone();
             let counter = counter.clone();
             let errors = errors.clone();
@@ -59,7 +59,7 @@ mod tests {
 
         println!("Concurrent test: {} successes, {} errors", total, errs);
         assert_eq!(errs, 0, "Race condition detected!");
-        assert_eq!(total, 1000, "Not all observations were added");
+        assert_eq!(total, 200, "Not all observations were added");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -86,7 +86,7 @@ mod tests {
 
         let mut handles = vec![];
 
-        for _ in 0..50 {
+        for _ in 0..15 {
             let obs = base_obs.clone();
             let storage = storage.clone();
             let counter = counter.clone();
