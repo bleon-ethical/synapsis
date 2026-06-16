@@ -1,152 +1,75 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
   <defs>
-    <radialGradient id="brainGrad" cx="50%" cy="45%" r="50%">
-      <stop offset="0%" stop-color="#818CF8" stop-opacity="0.25"/>
-      <stop offset="50%" stop-color="#6366F1" stop-opacity="0.1"/>
-      <stop offset="100%" stop-color="#312E81" stop-opacity="0.02"/>
-    </radialGradient>
-    <linearGradient id="neuronGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#A78BFA"/>
+      <stop offset="50%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#4F46E5"/>
+    </linearGradient>
+    <linearGradient id="nodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C4B5FD"/>
       <stop offset="100%" stop-color="#6366F1"/>
     </linearGradient>
-    <linearGradient id="pathGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#818CF8" stop-opacity="0.5"/>
-      <stop offset="100%" stop-color="#6366F1" stop-opacity="0.1"/>
-    </linearGradient>
-    <linearGradient id="pathGrad2" x1="100%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#A78BFA" stop-opacity="0.4"/>
-      <stop offset="100%" stop-color="#6366F1" stop-opacity="0"/>
-    </linearGradient>
     <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
     <filter id="glowStrong">
-      <feGaussianBlur stdDeviation="5" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <filter id="glowSoft">
-      <feGaussianBlur stdDeviation="8" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
 
-  <!-- Background -->
-  <rect width="400" height="400" fill="#0A0A1A" rx="40"/>
+  <!-- Synaptic torus - circular toroidal shape -->
+  <g transform="translate(200, 170)">
+    <!-- Outer ring -->
+    <circle cx="0" cy="0" r="42" fill="none" stroke="url(#ringGrad)" stroke-width="3" opacity="0.7"/>
+    <!-- Inner ring -->
+    <circle cx="0" cy="0" r="22" fill="none" stroke="url(#ringGrad)" stroke-width="2" opacity="0.5"/>
 
-  <!-- Outer glow -->
-  <circle cx="200" cy="180" r="140" fill="url(#brainGrad)"/>
+    <!-- Toroidal bridges (connecting inner to outer) -->
+    <line x1="0" y1="-42" x2="0" y2="-22" stroke="#818CF8" stroke-width="2" opacity="0.5"/>
+    <line x1="36" y1="-21" x2="19" y2="-11" stroke="#818CF8" stroke-width="2" opacity="0.5"/>
+    <line x1="36" y1="21" x2="19" y2="11" stroke="#818CF8" stroke-width="2" opacity="0.5"/>
+    <line x1="0" y1="42" x2="0" y2="22" stroke="#818CF8" stroke-width="2" opacity="0.5"/>
+    <line x1="-36" y1="21" x2="-19" y2="11" stroke="#818CF8" stroke-width="2" opacity="0.5"/>
+    <line x1="-36" y1="-21" x2="-19" y2="-11" stroke="#818CF8" stroke-width="2" opacity="0.5"/>
 
-  <!-- Neural Network - Layer 1 paths (outer ring) -->
-  <g filter="url(#glow)" opacity="0.4">
-    <!-- Top cluster -->
-    <line x1="120" y1="100" x2="150" y2="130" stroke="#818CF8" stroke-width="1"/>
-    <line x1="150" y1="130" x2="170" y2="150" stroke="#818CF8" stroke-width="1.2"/>
-    <line x1="200" y1="80" x2="190" y2="120" stroke="#6366F1" stroke-width="1"/>
-    <line x1="190" y1="120" x2="180" y2="150" stroke="#6366F1" stroke-width="1"/>
-    <line x1="280" y1="100" x2="240" y2="140" stroke="#818CF8" stroke-width="1"/>
-    <line x1="240" y1="140" x2="220" y2="155" stroke="#818CF8" stroke-width="1.2"/>
+    <!-- Core node -->
+    <g filter="url(#glowStrong)">
+      <circle cx="0" cy="0" r="4" fill="url(#nodeGrad)"/>
+      <circle cx="0" cy="0" r="9" fill="#818CF8" opacity="0.12"/>
+      <circle cx="0" cy="0" r="14" fill="none" stroke="#818CF8" stroke-width="0.6" opacity="0.2">
+        <animate attributeName="r" values="12;18;12" dur="3s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.25;0;0.25" dur="3s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- Synaptic signal arcs (neural transmission) -->
+    <path d="M 18 -11 Q 28 0 18 11" fill="none" stroke="#A78BFA" stroke-width="1.5" opacity="0.4" stroke-dasharray="3,3"/>
+    <path d="M -18 -11 Q -28 0 -18 11" fill="none" stroke="#A78BFA" stroke-width="1.5" opacity="0.4" stroke-dasharray="3,3"/>
   </g>
 
-  <!-- Neural Network - Layer 2 paths (inner) -->
-  <g filter="url(#glow)" opacity="0.5">
-    <line x1="130" y1="200" x2="155" y2="185" stroke="#A78BFA" stroke-width="1.2"/>
-    <line x1="155" y1="185" x2="175" y2="175" stroke="#A78BFA" stroke-width="1.5"/>
-    <line x1="175" y1="175" x2="200" y2="170" stroke="#818CF8" stroke-width="1.5"/>
-    <line x1="200" y1="170" x2="225" y2="175" stroke="#818CF8" stroke-width="1.5"/>
-    <line x1="225" y1="175" x2="245" y2="185" stroke="#A78BFA" stroke-width="1.5"/>
-    <line x1="245" y1="185" x2="270" y2="200" stroke="#A78BFA" stroke-width="1.2"/>
+  <!-- Outer memory nodes -->
+  <g filter="url(#glowStrong)">
+    <circle cx="200" cy="120" r="3" fill="url(#nodeGrad)"/>
+    <circle cx="252" cy="149" r="3" fill="url(#nodeGrad)"/>
+    <circle cx="252" cy="191" r="3" fill="url(#nodeGrad)"/>
+    <circle cx="200" cy="220" r="3" fill="url(#nodeGrad)"/>
+    <circle cx="148" cy="191" r="3" fill="url(#nodeGrad)"/>
+    <circle cx="148" cy="149" r="3" fill="url(#nodeGrad)"/>
   </g>
 
-  <!-- Neural Network - cross connections -->
-  <g filter="url(#glow)" opacity="0.3">
-    <line x1="150" y1="130" x2="190" y2="120" stroke="#818CF8" stroke-width="0.8"/>
-    <line x1="170" y1="150" x2="180" y2="150" stroke="#6366F1" stroke-width="0.8"/>
-    <line x1="130" y1="200" x2="175" y2="175" stroke="#A78BFA" stroke-width="0.8"/>
-    <line x1="270" y1="200" x2="225" y2="175" stroke="#A78BFA" stroke-width="0.8"/>
-    <line x1="240" y1="140" x2="200" y2="170" stroke="#6366F1" stroke-width="0.8"/>
-  </g>
-
-  <!-- Synaptic paths (dashed, representing signal transmission) -->
+  <!-- Node connection pathways -->
   <g filter="url(#glow)" opacity="0.25">
-    <line x1="100" y1="250" x2="140" y2="230" stroke="#818CF8" stroke-width="1" stroke-dasharray="3,4"/>
-    <line x1="140" y1="230" x2="180" y2="210" stroke="#818CF8" stroke-width="1" stroke-dasharray="3,4"/>
-    <line x1="180" y1="210" x2="220" y2="210" stroke="#A78BFA" stroke-width="1" stroke-dasharray="3,4"/>
-    <line x1="220" y1="210" x2="260" y2="230" stroke="#A78BFA" stroke-width="1" stroke-dasharray="3,4"/>
-    <line x1="260" y1="230" x2="300" y2="250" stroke="#818CF8" stroke-width="1" stroke-dasharray="3,4"/>
-    <line x1="140" y1="100" x2="170" y2="150" stroke="#6366F1" stroke-width="0.8" stroke-dasharray="2,5"/>
-    <line x1="260" y1="100" x2="230" y2="150" stroke="#6366F1" stroke-width="0.8" stroke-dasharray="2,5"/>
+    <line x1="200" y1="120" x2="200" y2="128" stroke="#818CF8" stroke-width="1" stroke-dasharray="2,3"/>
+    <line x1="252" y1="149" x2="238" y2="156" stroke="#818CF8" stroke-width="1" stroke-dasharray="2,3"/>
+    <line x1="252" y1="191" x2="238" y2="184" stroke="#818CF8" stroke-width="1" stroke-dasharray="2,3"/>
+    <line x1="200" y1="220" x2="200" y2="212" stroke="#818CF8" stroke-width="1" stroke-dasharray="2,3"/>
+    <line x1="148" y1="191" x2="162" y2="184" stroke="#818CF8" stroke-width="1" stroke-dasharray="2,3"/>
+    <line x1="148" y1="149" x2="162" y2="156" stroke="#818CF8" stroke-width="1" stroke-dasharray="2,3"/>
   </g>
-
-  <!-- Neuron nodes - Layer 1 (outer) -->
-  <g filter="url(#glowStrong)">
-    <circle cx="120" cy="100" r="3.5" fill="#818CF8"/>
-    <circle cx="200" cy="80" r="3" fill="#6366F1"/>
-    <circle cx="280" cy="100" r="3.5" fill="#818CF8"/>
-    <circle cx="100" cy="250" r="3" fill="#818CF8"/>
-    <circle cx="300" cy="250" r="3" fill="#818CF8"/>
-  </g>
-
-  <!-- Neuron nodes - Layer 2 (mid) -->
-  <g filter="url(#glowStrong)">
-    <circle cx="150" cy="130" r="3" fill="#818CF8"/>
-    <circle cx="240" cy="140" r="3" fill="#818CF8"/>
-    <circle cx="130" cy="200" r="3.5" fill="#A78BFA"/>
-    <circle cx="270" cy="200" r="3.5" fill="#A78BFA"/>
-  </g>
-
-  <!-- Neuron nodes - Layer 3 (inner) -->
-  <g filter="url(#glowStrong)">
-    <circle cx="170" cy="150" r="3" fill="#6366F1"/>
-    <circle cx="220" cy="155" r="3" fill="#6366F1"/>
-    <circle cx="155" cy="185" r="2.5" fill="#A78BFA"/>
-    <circle cx="245" cy="185" r="2.5" fill="#A78BFA"/>
-    <circle cx="140" cy="230" r="2.5" fill="#818CF8"/>
-    <circle cx="260" cy="230" r="2.5" fill="#818CF8"/>
-  </g>
-
-  <!-- Core node (central processing) -->
-  <g filter="url(#glowStrong)">
-    <circle cx="200" cy="170" r="5" fill="#A78BFA"/>
-    <circle cx="200" cy="170" r="8" fill="#A78BFA" opacity="0.15"/>
-  </g>
-
-  <!-- Pulse ring around core -->
-  <circle cx="200" cy="170" r="14" fill="none" stroke="#818CF8" stroke-width="0.8" opacity="0.3">
-    <animate attributeName="r" values="10;20;10" dur="3s" repeatCount="indefinite"/>
-    <animate attributeName="opacity" values="0.4;0;0.4" dur="3s" repeatCount="indefinite"/>
-  </circle>
-
-  <!-- Memory circuit traces (bottom brain area) -->
-  <g filter="url(#glow)" opacity="0.2">
-    <rect x="150" y="240" width="8" height="8" rx="1" fill="none" stroke="#818CF8" stroke-width="0.8"/>
-    <rect x="180" y="245" width="8" height="8" rx="1" fill="none" stroke="#818CF8" stroke-width="0.8"/>
-    <rect x="212" y="245" width="8" height="8" rx="1" fill="none" stroke="#818CF8" stroke-width="0.8"/>
-    <rect x="242" y="240" width="8" height="8" rx="1" fill="none" stroke="#818CF8" stroke-width="0.8"/>
-    <line x1="158" y1="244" x2="180" y2="249" stroke="#818CF8" stroke-width="0.8"/>
-    <line x1="188" y1="249" x2="212" y2="249" stroke="#818CF8" stroke-width="0.8"/>
-    <line x1="220" y1="249" x2="242" y2="244" stroke="#818CF8" stroke-width="0.8"/>
-  </g>
-
-  <!-- Brain hemisphere outlines (subtle) -->
-  <path d="M 160 155 Q 145 130 160 110 Q 180 90 200 95 Q 220 90 240 110 Q 255 130 240 155" fill="none" stroke="#818CF8" stroke-width="1" opacity="0.08"/>
-  <path d="M 165 160 Q 150 150 155 135" fill="none" stroke="#818CF8" stroke-width="0.8" opacity="0.06"/>
-  <path d="M 235 160 Q 250 150 245 135" fill="none" stroke="#818CF8" stroke-width="0.8" opacity="0.06"/>
 
   <!-- Text -->
-  <text x="200" y="330" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="40" font-weight="700" fill="#818CF8" filter="url(#glow)">
-    SYNAPSIS
-  </text>
-  <text x="200" y="358" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#A78BFA" letter-spacing="5">
-    MEMORY ENGINE
-  </text>
+  <text x="200" y="305" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="36" font-weight="700" fill="#818CF8" filter="url(#glow)">SYNAPSIS</text>
+  <text x="200" y="330" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="10" font-weight="400" fill="#A78BFA" letter-spacing="5">MEMORY ENGINE</text>
 </svg>
