@@ -305,7 +305,8 @@ impl AgentDiscovery {
         self.registry.register(Arc::new(shell::ShellWorker::new()));
         self.registry.register(Arc::new(file::FileWorker::new()));
         self.registry.register(Arc::new(code::CodeWorker::new()));
-        self.registry.register(Arc::new(search::SearchWorker::new()));
+        self.registry
+            .register(Arc::new(search::SearchWorker::new()));
         self.registry.register(Arc::new(git::GitWorker::new()));
     }
 

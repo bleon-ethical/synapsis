@@ -546,5 +546,3 @@ impl Clone for AgentRegistry {
         }
     }
 }
-
-

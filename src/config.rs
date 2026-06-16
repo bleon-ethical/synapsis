@@ -4,9 +4,7 @@ use std::sync::OnceLock;
 static QUIET: OnceLock<bool> = OnceLock::new();
 
 pub fn is_quiet() -> bool {
-    *QUIET.get_or_init(|| {
-        std::env::var("SYNAPSIS_QUIET").is_ok() || std::env::var("QUIET").is_ok()
-    })
+    *QUIET.get_or_init(|| std::env::var("SYNAPSIS_QUIET").is_ok() || std::env::var("QUIET").is_ok())
 }
 
 pub fn data_dir() -> PathBuf {
@@ -53,7 +51,9 @@ pub fn allow_dangerous_shell() -> bool {
 }
 
 pub fn secret_key() -> Option<String> {
-    std::env::var("SYNAPSIS_SECRET_KEY").ok().filter(|k| !k.is_empty())
+    std::env::var("SYNAPSIS_SECRET_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
 }
 
 pub fn api_keys() -> Vec<String> {

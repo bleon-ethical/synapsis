@@ -1,5 +1,5 @@
+use super::{Task, TaskError, TaskResult};
 use crate::core::lock_utils::*;
-use super::{Task, TaskResult, TaskError};
 use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
@@ -69,19 +69,30 @@ macro_rules! impl_connector {
 
             fn spawn_inner(&mut self, agent_name: &str) -> Result<(), TaskError> {
                 if *self.state.running.lock_safe() {
-                    return Err(TaskError::new(0x0200, &format!("Agent already running"), agent_name));
+                    return Err(TaskError::new(
+                        0x0200,
+                        &format!("Agent already running"),
+                        agent_name,
+                    ));
                 }
 
                 let mut cmd = Command::new(&self.config.command);
-                for arg in &self.config.args { cmd.arg(arg); }
-                for (key, val) in &self.config.env { cmd.env(key, val); }
+                for arg in &self.config.args {
+                    cmd.arg(arg);
+                }
+                for (key, val) in &self.config.env {
+                    cmd.env(key, val);
+                }
 
                 cmd.stdin(Stdio::piped());
                 cmd.stdout(Stdio::piped());
                 cmd.stderr(Stdio::piped());
 
                 let child = cmd.spawn().map_err(|e| {
-                    TaskError::execution_failed(&format!("Failed to spawn {}: {}", agent_name, e), agent_name)
+                    TaskError::execution_failed(
+                        &format!("Failed to spawn {}: {}", agent_name, e),
+                        agent_name,
+                    )
                 })?;
 
                 self.state.process = Some(child);
@@ -95,15 +106,25 @@ macro_rules! impl_connector {
                 }
 
                 let task_json = serde_json::to_string(&task).map_err(|e| {
-                    TaskError::new(0x0202, &format!("Failed to serialize task: {}", e), agent_name)
+                    TaskError::new(
+                        0x0202,
+                        &format!("Failed to serialize task: {}", e),
+                        agent_name,
+                    )
                 })?;
 
-                self.state.pending_tasks.lock_safe().insert(task.id.clone(), task);
+                self.state
+                    .pending_tasks
+                    .lock_safe()
+                    .insert(task.id.clone(), task);
 
                 if let Some(ref mut child) = self.state.process {
                     if let Some(ref mut stdin) = child.stdin {
                         stdin.write_all(task_json.as_bytes()).map_err(|e| {
-                            TaskError::execution_failed(&format!("Failed to send task: {}", e), agent_name)
+                            TaskError::execution_failed(
+                                &format!("Failed to send task: {}", e),
+                                agent_name,
+                            )
                         })?;
                     }
                 }
@@ -113,15 +134,24 @@ macro_rules! impl_connector {
     };
 }
 
-impl_connector!(OpenCodeConnector, "opencode", "opencode", ["--agent", "--mode", "pipe"]);
+impl_connector!(
+    OpenCodeConnector,
+    "opencode",
+    "opencode",
+    ["--agent", "--mode", "pipe"]
+);
 impl_connector!(QwenConnector, "qwen", "qwen", ["--agent", "--pipe"]);
 impl_connector!(ClaudeConnector, "claude", "claude", ["--agent", "--pipe"]);
 
 macro_rules! impl_connector_trait {
     ($name:ident, $agent_type:expr) => {
         impl ExternalAgentConnector for $name {
-            fn agent_id(&self) -> &str { $agent_type }
-            fn agent_type(&self) -> &str { $agent_type }
+            fn agent_id(&self) -> &str {
+                $agent_type
+            }
+            fn agent_type(&self) -> &str {
+                $agent_type
+            }
 
             fn is_running(&self) -> bool {
                 *self.state.running.lock_safe()
@@ -152,7 +182,10 @@ macro_rules! impl_connector_trait {
             fn shutdown(&mut self) -> Result<(), TaskError> {
                 if let Some(ref mut child) = self.state.process {
                     child.kill().map_err(|e| {
-                        TaskError::execution_failed(&format!("Failed to kill agent: {}", e), $agent_type)
+                        TaskError::execution_failed(
+                            &format!("Failed to kill agent: {}", e),
+                            $agent_type,
+                        )
                     })?;
                 }
                 self.state.process = None;

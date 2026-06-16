@@ -33,8 +33,6 @@ pub struct Database {
     encryption_key: Option<Vec<u8>>,
 }
 
-
-
 impl Database {
     pub fn new() -> Self {
         let encryption_key = std::env::var("SYNAPSIS_DB_KEY")
@@ -64,8 +62,7 @@ impl Database {
                 Ok(conn) => {
                     let hex_key = hex::encode(key);
                     let pragma = format!("PRAGMA key = x'{}'", hex_key);
-                    if conn.execute_batch(&pragma).is_err()
-                    {
+                    if conn.execute_batch(&pragma).is_err() {
                         db_warn!("[Database] Warning: failed to set encryption key");
                     }
                     let _ = conn.execute_batch("PRAGMA cipher_version");
@@ -303,7 +300,7 @@ impl Database {
             ",
         )?;
 
-        if version >= 1 && version < 2 {
+        if (1..2).contains(&version) {
             let _ = conn.execute_batch(
                 "INSERT INTO observations_fts(rowid, title, content) SELECT id, title, content FROM observations;
                  INSERT INTO schema_version (version) VALUES (2);"
@@ -714,7 +711,11 @@ fn row_to_observation(row: &rusqlite::Row) -> rusqlite::Result<Observation> {
         tool_name: row.get(7)?,
         scope: {
             let v: u8 = row.get(8)?;
-            if v == 1 { Scope::Personal } else { Scope::Project }
+            if v == 1 {
+                Scope::Personal
+            } else {
+                Scope::Project
+            }
         },
         topic_key: row.get(9)?,
         content_hash: {
@@ -792,24 +793,25 @@ impl Database {
             "INSERT INTO observations_fts(rowid, title, content) VALUES (?1, ?2, ?3)",
             params![id, obs.title, obs.content],
         );
-        let _ = conn.execute_batch(
-            "INSERT INTO observations_fts(observations_fts) VALUES('rebuild')"
-        );
+        let _ =
+            conn.execute_batch("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
         Ok(ObservationId::new(id))
     }
 
-fn sanitize_fts_query(query: &str) -> String {
-    let lower = query.to_lowercase();
-    let blocklist = ["or ", "and ", "not ", "near("];
-    if blocklist.iter().any(|d| lower.contains(d)) {
-        let sanitized: String = query
-            .chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_' || *c == '"')
-            .collect();
-        return sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+    fn sanitize_fts_query(query: &str) -> String {
+        let lower = query.to_lowercase();
+        let blocklist = ["or ", "and ", "not ", "near("];
+        if blocklist.iter().any(|d| lower.contains(d)) {
+            let sanitized: String = query
+                .chars()
+                .filter(|c| {
+                    c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_' || *c == '"'
+                })
+                .collect();
+            return sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+        query.to_string()
     }
-    query.to_string()
-}
 
     pub fn search_fts5(
         &self,
@@ -831,9 +833,9 @@ fn sanitize_fts_query(query: &str) -> String {
              LIMIT ?4",
         )?;
         let sanitized = Self::sanitize_fts_query(query);
-        let scope_int = scope.and_then(|s| match s {
-            "personal" => Some(1u8),
-            _ => Some(0u8),
+        let scope_int = scope.map(|s| match s {
+            "personal" => 1u8,
+            _ => 0u8,
         });
         let rows = stmt.query_map(params![sanitized, project, scope_int, limit], |row| {
             Ok(serde_json::json!({
@@ -906,8 +908,6 @@ fn sanitize_fts_query(query: &str) -> String {
     }
 }
 
-
-
 impl StoragePort for Database {
     fn init(&self) -> Result<()> {
         let conn = self.get_conn();
@@ -950,7 +950,10 @@ impl StoragePort for Database {
             "SELECT id, sync_id, session_id, project, observation_type, title, content, tool_name, scope, topic_key, content_hash, revision_count, duplicate_count, last_seen_at, created_at, updated_at, deleted_at, integrity_hash, classification
              FROM observations WHERE deleted_at IS NULL AND (title LIKE ?1 OR content LIKE ?1) ORDER BY created_at DESC LIMIT ?2"
         )?;
-        let rows = stmt.query_map(rusqlite::params![search_term, params.limit], row_to_observation)?;
+        let rows = stmt.query_map(
+            rusqlite::params![search_term, params.limit],
+            row_to_observation,
+        )?;
         let observations: Vec<Observation> = rows.filter_map(|r| r.ok()).collect();
         Ok(observations
             .into_iter()

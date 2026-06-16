@@ -52,9 +52,7 @@ fn try_extract_href(html: &str, start: usize) -> Option<String> {
             let val_start = start + href_start + prefix.len();
             if *delimiter == ' ' {
                 let remaining = &html[val_start..];
-                let end = remaining
-                    .find(|c| c == ' ' || c == '>')
-                    .unwrap_or(remaining.len());
+                let end = remaining.find([' ', '>']).unwrap_or(remaining.len());
                 return Some(remaining[..end].to_string());
             }
             if let Some(href_end) = html[val_start..].find(*delimiter) {
@@ -230,7 +228,7 @@ pub fn derive_encryption_key() -> [u8; 32] {
     if let Some(parent) = key_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&key_path, &key);
+    let _ = std::fs::write(&key_path, key);
     key
 }
 

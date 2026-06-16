@@ -49,7 +49,10 @@ fn get_secret_key() -> Vec<u8> {
             return data;
         }
     }
-    eprintln!("[SYNAPSIS] Generating new session HMAC key at: {}", key_path.display());
+    eprintln!(
+        "[SYNAPSIS] Generating new session HMAC key at: {}",
+        key_path.display()
+    );
     let mut key = vec![0u8; 32];
     getrandom::getrandom(&mut key).expect("failed to generate random key");
     if let Some(parent) = key_path.parent() {

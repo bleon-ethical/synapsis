@@ -4,9 +4,9 @@ use std::sync::MutexGuard;
 
 use crate::core::uuid::Uuid;
 
-use super::Orchestrator;
-use super::types::*;
 use super::timestamp_now;
+use super::types::*;
+use super::Orchestrator;
 
 impl Orchestrator {
     pub fn register_agent(&self, agent_type: &str, skills: Vec<String>) -> String {
@@ -148,8 +148,7 @@ impl Orchestrator {
                 if let Some(sub) = agents.get(sub_id) {
                     result.push(sub.clone());
                     if sub.is_sub_orchestrator {
-                        let deeper =
-                            Self::collect_sub_tree(&agents, sub_id);
+                        let deeper = Self::collect_sub_tree(&agents, sub_id);
                         result.extend(deeper);
                     }
                 }

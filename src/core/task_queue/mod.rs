@@ -8,10 +8,8 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 use tokio::time::{interval, Duration};
 
-pub use types::{
-    AgentInfo, Priority, Task, TaskQueueEvent, TaskQueueEventType, TaskStatus,
-};
 use types::PriorityTask;
+pub use types::{AgentInfo, Priority, Task, TaskQueueEvent, TaskQueueEventType, TaskStatus};
 
 pub struct TaskQueue {
     pending_queue: Arc<RwLock<BinaryHeap<PriorityTask>>>,

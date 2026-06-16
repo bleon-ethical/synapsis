@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use crate::core::resource_manager::{AgentLimits, ResourceManager};
 
 pub use types::{
-    Agent, AgentStatus, LegacyFile, MessageType, OrchestratorMessage, ReviewStatus,
-    Task, TaskStatus,
+    Agent, AgentStatus, LegacyFile, MessageType, OrchestratorMessage, ReviewStatus, Task,
+    TaskStatus,
 };
 
 pub struct Orchestrator {

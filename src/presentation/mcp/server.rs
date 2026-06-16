@@ -129,9 +129,16 @@ impl McpServer {
                 let has_error = resp.get("error").is_some();
                 let is_write_tool = matches!(
                     tool_name.as_str(),
-                    "mem_save" | "memory_add" | "mem_delete" | "db_backup" | "db_prune"
-                        | "task_create" | "agent_register" | "skill_register"
-                        | "watchdog_snapshot" | "antibrick_enable"
+                    "mem_save"
+                        | "memory_add"
+                        | "mem_delete"
+                        | "db_backup"
+                        | "db_prune"
+                        | "task_create"
+                        | "agent_register"
+                        | "skill_register"
+                        | "watchdog_snapshot"
+                        | "antibrick_enable"
                 );
                 if is_tool_call && !has_error && !tool_name.is_empty() && is_write_tool {
                     self.auto_save_observation(&tool_name, &request["params"]["arguments"]);

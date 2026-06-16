@@ -1,7 +1,7 @@
-use crate::core::lock_utils::*;
-use super::Orchestrator;
-use super::types::LegacyFile;
 use super::timestamp_now;
+use super::types::LegacyFile;
+use super::Orchestrator;
+use crate::core::lock_utils::*;
 
 impl Orchestrator {
     pub fn protect_legacy_file(&self, path: &str, reason: &str) {

@@ -129,7 +129,9 @@ impl ChallengeResponse {
 
         if verifier.verify(&challenge.nonce, response)? {
             challenge.verified = true;
-            self.failed_attempts.write_safe().remove(&agent_type.unwrap_or_default());
+            self.failed_attempts
+                .write_safe()
+                .remove(&agent_type.unwrap_or_default());
             return Ok(true);
         }
 

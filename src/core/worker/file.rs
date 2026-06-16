@@ -1,6 +1,6 @@
+use super::{Task, TaskError, TaskResult, TaskType, WorkerAgent};
 use crate::core::lock_utils::*;
 use crate::core::uuid::Uuid;
-use super::{Task, TaskResult, TaskError, TaskType, WorkerAgent};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;

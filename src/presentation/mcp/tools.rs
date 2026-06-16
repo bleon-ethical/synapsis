@@ -7,7 +7,10 @@ use crate::infrastructure::database::Database;
 use crate::infrastructure::skills::{Skill, SkillCategory, SkillRegistry};
 use serde_json::{json, Value};
 
-use super::html::{derive_encryption_key, extract_meta, extract_title, format_size2, strip_html, count_links, extract_links, extract_headings};
+use super::html::{
+    count_links, derive_encryption_key, extract_headings, extract_links, extract_meta,
+    extract_title, format_size2, strip_html,
+};
 
 pub fn handle_mem_save(db: &Database, id: &Value, args: &Value) -> anyhow::Result<Value> {
     let title = args["title"].as_str().unwrap_or("Untitled");
@@ -57,7 +60,8 @@ pub fn handle_mem_search(db: &Database, id: &Value, args: &Value) -> anyhow::Res
     let scope = args["scope"].as_str();
 
     let results = if !query.is_empty() && !query.contains('%') && !query.contains('_') {
-        db.search_fts5(query, project, scope, limit).unwrap_or_default()
+        db.search_fts5(query, project, scope, limit)
+            .unwrap_or_default()
     } else {
         db.search_fts(query, project, limit).unwrap_or_default()
     };
@@ -360,11 +364,30 @@ pub fn handle_watchdog_check_path(
 fn is_private_url(url_str: &str) -> bool {
     let lower = url_str.to_lowercase();
     let private_patterns = [
-        "localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0",
-        "10.", "172.16.", "172.17.", "172.18.", "172.19.",
-        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
-        "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
-        "172.30.", "172.31.", "192.168.", "169.254.",
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "[::1]",
+        "0.0.0.0",
+        "10.",
+        "172.16.",
+        "172.17.",
+        "172.18.",
+        "172.19.",
+        "172.20.",
+        "172.21.",
+        "172.22.",
+        "172.23.",
+        "172.24.",
+        "172.25.",
+        "172.26.",
+        "172.27.",
+        "172.28.",
+        "172.29.",
+        "172.30.",
+        "172.31.",
+        "192.168.",
+        "169.254.",
     ];
     private_patterns.iter().any(|p| lower.contains(p))
 }
@@ -388,10 +411,12 @@ pub fn handle_db_backup(db: &Database, id: &Value, args: &Value) -> anyhow::Resu
     }
     let backup_path = match sanitize_path(path) {
         Ok(p) => p,
-        Err(e) => return Ok(json!({
-            "jsonrpc": "2.0", "id": id,
-            "error": { "code": -32602, "message": e }
-        })),
+        Err(e) => {
+            return Ok(json!({
+                "jsonrpc": "2.0", "id": id,
+                "error": { "code": -32602, "message": e }
+            }))
+        }
     };
     match db.backup_to(&backup_path) {
         Ok(_) => Ok(json!({
@@ -612,8 +637,8 @@ pub fn handle_mcp_call(id: &Value, args: &Value) -> anyhow::Result<Value> {
             "error": { "code": -32602, "message": format!("SSRF protection: blocked private URL '{}'. Set SYNAPSIS_ALLOW_PRIVATE_MCP=1 to allow", url) }
         }));
     }
-    let mut builder = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60));
+    let mut builder =
+        reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(60));
     if std::env::var("SYNAPSIS_INSECURE_TLS").is_ok() {
         builder = builder.danger_accept_invalid_certs(true);
     }

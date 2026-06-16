@@ -583,5 +583,3 @@ Performance: Partitioning, indexing, compression, query optimization
         }
     }
 }
-
-

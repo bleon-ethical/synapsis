@@ -1,6 +1,6 @@
+use super::{Task, TaskError, TaskResult, WorkerAgent};
 use crate::core::lock_utils::*;
 use crate::core::uuid::Uuid;
-use super::{Task, TaskResult, TaskError, WorkerAgent};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::process::Command as TokioCommand;
