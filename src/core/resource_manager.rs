@@ -173,8 +173,7 @@ impl ResourceManager {
     /// Set limits for an agent type
     pub fn set_agent_limits(&self, agent_type: &str, limits: AgentLimits) {
         self.agent_limits
-            .lock()
-            .unwrap()
+            .lock_safe()
             .insert(agent_type.to_string(), limits);
     }
 
@@ -201,13 +200,9 @@ impl ResourceManager {
         let agent_limits = self.agent_limits.lock_safe();
 
         if let Some(limits) = agent_limits.get(agent_type) {
-            if let Some(stats) = agent_stats.values().find(|s| {
-                // Find agents of this type
-                agent_type.starts_with(s.pid.map(|_| "").unwrap_or(""))
-            }) {
-                if stats.task_count >= limits.max_concurrent_tasks {
-                    return false;
-                }
+            let total_tasks: usize = agent_stats.values().map(|s| s.task_count).sum();
+            if total_tasks >= limits.max_concurrent_tasks {
+                return false;
             }
         }
 
@@ -387,14 +382,15 @@ mod tests {
 
     #[test]
     fn test_throttle_logic() {
-        let mut limits = GlobalLimits::default();
-        limits.max_cpu_percent = 10.0; // Very low threshold for testing
-        limits.enable_adaptive_throttling = false;
+        let limits = GlobalLimits {
+            max_cpu_percent: 10.0,
+            enable_adaptive_throttling: false,
+            ..Default::default()
+        };
 
         let rm = ResourceManager::with_limits(limits);
 
         // Can't really test actual CPU usage, but we can test the method doesn't panic
-        let can_accept = rm.can_accept_task("test");
-        assert!(can_accept || !can_accept); // Either is fine, just not panic
+        let _ = rm.can_accept_task("test");
     }
 }

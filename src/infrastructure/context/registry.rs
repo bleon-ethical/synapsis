@@ -8,10 +8,12 @@
 //! - Carga perezosa y prefetch
 
 use super::cold_storage::{ColdStats, ColdStorage};
-use super::context::{Context, ContextValue};
+use super::context_types::{
+    now_ts as now_timestamp, AccessLevel, Context, ContextId, ContextRef, ContextRelation,
+    ContextState, ContextType, ContextValue, Priority, Timestamp,
+};
 use super::global_context::{GlobalContext, VarType};
 use super::relevance::{ContextRelevanceData, RelevanceEngine};
-use super::types::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -133,22 +135,16 @@ impl ContextRegistry {
 
     /// Obtiene un contexto (carga si es necesario)
     pub fn get(&mut self, id: &ContextId) -> Option<&Context> {
-        // Primero buscar en hot
-        if let Some(ctx) = self.hot_contexts.get(id) {
-            return Some(ctx);
+        if self.hot_contexts.contains_key(id) {
+            return self.hot_contexts.get(id);
         }
-
-        // Luego en warm
-        if let Some(ctx) = self.warm_contexts.get(id) {
-            return Some(ctx);
+        if self.warm_contexts.contains_key(id) {
+            return self.warm_contexts.get(id);
         }
-
-        // Cargar desde frío si es necesario
         if self.working_set.contains(id) {
             self.restore_from_cold(id);
             return self.hot_contexts.get(id);
         }
-
         None
     }
 
@@ -175,25 +171,28 @@ impl ContextRegistry {
     ) -> HashMap<ContextId, PartialContext> {
         let mut result = HashMap::new();
 
-        let context = match self.get(id) {
-            Some(c) => c,
+        let connections: Vec<(ContextId, AccessLevel)> = match self.get(id) {
+            Some(c) => c
+                .connections
+                .iter()
+                .filter(|conn| conn.access_level >= level)
+                .map(|conn| (conn.id.clone(), conn.access_level))
+                .collect(),
             None => return result,
         };
 
-        // Obtener contexto actual (si nivel permite)
         if level >= AccessLevel::Partial {
-            result.insert(id.clone(), PartialContext::from_full(context, level));
+            if let Some(context) = self.get(id) {
+                result.insert(id.clone(), PartialContext::from_full(context, level));
+            }
         }
 
-        // Obtener contextos conectados
-        for conn in &context.connections {
-            if conn.access_level >= level {
-                if let Some(connected) = self.get(&conn.id) {
-                    result.insert(
-                        conn.id.clone(),
-                        PartialContext::from_full(connected, conn.access_level),
-                    );
-                }
+        for (conn_id, conn_level) in &connections {
+            if let Some(connected) = self.get(conn_id) {
+                result.insert(
+                    conn_id.clone(),
+                    PartialContext::from_full(connected, *conn_level),
+                );
             }
         }
 
@@ -232,7 +231,7 @@ impl ContextRegistry {
     }
 
     /// Busca contextos por query sin cargar todo
-    pub fn search(&self, query: &str) -> Vec<SearchResult> {
+    pub fn search(&self, query: &str) -> Vec<RegistrySearchResult> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
 
@@ -240,7 +239,7 @@ impl ContextRegistry {
         for (id, ctx) in &self.hot_contexts {
             let relevance = self.calculate_search_relevance(ctx, &query_lower);
             if relevance > 0.0 {
-                results.push(SearchResult {
+                results.push(RegistrySearchResult {
                     context_id: id.clone(),
                     name: ctx.name.clone(),
                     context_type: ctx.context_type,
@@ -254,7 +253,7 @@ impl ContextRegistry {
         for (id, ctx) in &self.warm_contexts {
             let relevance = self.calculate_search_relevance(ctx, &query_lower);
             if relevance > 0.0 {
-                results.push(SearchResult {
+                results.push(RegistrySearchResult {
                     context_id: id.clone(),
                     name: ctx.name.clone(),
                     context_type: ctx.context_type,
@@ -267,7 +266,7 @@ impl ContextRegistry {
         // Buscar en cold (índice solamente)
         let cold_results = self.cold_storage.search(query);
         for cold in cold_results {
-            results.push(SearchResult {
+            results.push(RegistrySearchResult {
                 context_id: cold.context_id,
                 name: cold.name,
                 context_type: cold.context_type,
@@ -387,7 +386,7 @@ impl ContextRegistry {
 
         // Añadir referencia
         self.cold_refs.insert(
-            id,
+            id.clone(),
             ColdRef {
                 context_id: id.clone(),
                 archived_at: now_timestamp(),
@@ -503,7 +502,7 @@ impl ContextRegistry {
     }
 
     /// Obtiene variable del contexto global
-    pub fn get_global(&mut self, name: &str) -> Option<&ContextValue> {
+    pub fn get_global(&mut self, name: &str) -> Option<ContextValue> {
         self.global.get(name)
     }
 
@@ -515,7 +514,7 @@ impl ContextRegistry {
 
 /// Resultado de búsqueda
 #[derive(Debug, Clone)]
-pub struct SearchResult {
+pub struct RegistrySearchResult {
     pub context_id: ContextId,
     pub name: String,
     pub context_type: ContextType,

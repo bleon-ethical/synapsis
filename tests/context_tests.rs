@@ -1,8 +1,8 @@
 //! # Context Module Tests
 
 use synapsis::infrastructure::context::{
-    AccessLevel, Context, ContextId, ContextMetrics, ContextRef, ContextRegistry, ContextState,
-    ContextType, ContextValue, Priority,
+    AccessLevel, Context, ContextId, ContextMetrics, ContextRef, ContextRegistry, ContextRelation,
+    ContextState, ContextType, ContextValue, Priority,
 };
 
 #[test]
@@ -10,13 +10,13 @@ fn test_context_id_new() {
     let id1 = ContextId::new();
     let id2 = ContextId::new();
     assert_ne!(id1.0, id2.0);
-    assert!(id1.0.len() > 0);
+    assert!(!id1.0.is_empty());
 }
 
 #[test]
 fn test_context_id_default() {
     let id: ContextId = Default::default();
-    assert!(id.0.len() > 0);
+    assert!(!id.0.is_empty());
 }
 
 #[test]
@@ -309,8 +309,8 @@ fn test_context_value_from_conversions() {
     let n: ContextValue = 42i64.into();
     assert!(matches!(n, ContextValue::Number(42.0)));
 
-    let f: ContextValue = 3.14f64.into();
-    assert!(matches!(f, ContextValue::Number(3.14)));
+    let f: ContextValue = std::f64::consts::PI.into();
+    assert!(matches!(f, ContextValue::Number(v) if (v - std::f64::consts::PI).abs() < 1e-10));
 
     let b: ContextValue = true.into();
     assert!(matches!(b, ContextValue::Boolean(true)));
@@ -323,10 +323,12 @@ fn test_context_ref() {
     let ref1 = ContextRef {
         id: ContextId::new(),
         access_level: AccessLevel::Full,
+        relation: ContextRelation::Reference,
     };
     let ref2 = ContextRef {
         id: ContextId::new(),
         access_level: AccessLevel::Partial,
+        relation: ContextRelation::Reference,
     };
 
     assert_ne!(ref1.id.0, ref2.id.0);
@@ -349,6 +351,7 @@ fn test_access_levels() {
         let _ref = ContextRef {
             id: ctx.id.clone(),
             access_level: level,
+            relation: ContextRelation::Reference,
         };
     }
 }

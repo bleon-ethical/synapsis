@@ -96,7 +96,7 @@ impl SessionId {
     pub fn new(cli_type: &str) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as i64;
 
         let uuid = Self::generate_uuid();
@@ -149,7 +149,10 @@ impl SessionId {
     pub fn from_string(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split('-').collect();
         if parts.len() >= 6 {
-            let signature = format!("{}-{}", parts[5], parts.get(6).unwrap_or(&""));
+            let signature = match parts.get(6) {
+                Some(p6) => format!("{}-{}", parts[5], p6),
+                None => parts[5].to_string(),
+            };
             Some(Self {
                 cli_type: parts[0].to_string(),
                 instance_uuid: parts[1].to_string(),
@@ -202,7 +205,7 @@ impl SessionId {
     pub fn age(&self) -> i64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as i64;
         now - self.started_at
     }

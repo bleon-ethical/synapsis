@@ -89,7 +89,7 @@ fn test_task_types() {
 
 #[test]
 fn test_task_states() {
-    let states = vec![
+    let states = [
         TaskState::Pending,
         TaskState::Assigned,
         TaskState::InProgress,
@@ -102,7 +102,7 @@ fn test_task_states() {
 
 #[test]
 fn test_task_priority() {
-    let priorities = vec![
+    let priorities = [
         TaskPriority::Critical,
         TaskPriority::High,
         TaskPriority::Normal,
@@ -129,7 +129,7 @@ fn test_agent_types() {
 
 #[test]
 fn test_agent_states() {
-    let states = vec![
+    let states = [
         AgentState::Idle,
         AgentState::Working,
         AgentState::Waiting,
@@ -296,7 +296,7 @@ fn test_orchestrator_recommend_filters_type() {
     let recommendations = orch.recommend(&task);
 
     // Should only recommend coder
-    assert!(recommendations.len() >= 1);
+    assert!(!recommendations.is_empty());
 }
 
 #[test]

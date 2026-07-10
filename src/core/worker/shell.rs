@@ -4,7 +4,7 @@ use crate::core::uuid::Uuid;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
 
 pub struct ShellWorker {
@@ -60,11 +60,9 @@ impl ShellWorker {
         command: &str,
         timeout_secs: u64,
     ) -> Result<String, String> {
-        if Self::has_dangerous_metachars(command)
-            && std::env::var("SYNAPSIS_ALLOW_DANGEROUS_SHELL").is_err()
-        {
+        if Self::has_dangerous_metachars(command) {
             return Err(format!(
-                "BLOCKED: Dangerous shell metacharacters in command. Set SYNAPSIS_ALLOW_DANGEROUS_SHELL=1 to allow: {}",
+                "BLOCKED: Dangerous shell metacharacters in command: {}",
                 command
             ));
         }
@@ -101,7 +99,7 @@ impl ShellWorker {
 
             if let Some(mut stdout) = stdout {
                 let mut reader = tokio::io::BufReader::new(&mut stdout);
-                let _ = reader.read_line(&mut output).await;
+                let _ = reader.read_to_string(&mut output).await;
             }
 
             let status = child
@@ -112,7 +110,7 @@ impl ShellWorker {
             if let Some(mut stderr) = stderr {
                 let mut err_output = String::new();
                 let mut stderr_reader = tokio::io::BufReader::new(&mut stderr);
-                let _ = stderr_reader.read_line(&mut err_output).await;
+                let _ = stderr_reader.read_to_string(&mut err_output).await;
                 if !err_output.is_empty() {
                     output.push_str("\nSTDERR: ");
                     output.push_str(&err_output);
@@ -174,10 +172,13 @@ impl WorkerAgent for ShellWorker {
             .and_then(|v| v.as_u64())
             .unwrap_or(300);
 
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+        let rt = RT.get_or_init(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to build shell runtime")
+        });
         let result = rt.block_on(self.execute_shell_async(command, timeout));
 
         let duration = start.elapsed().as_millis() as u64;

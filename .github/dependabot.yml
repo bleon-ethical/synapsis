@@ -1,16 +1,45 @@
+# Dependabot — Automated dependency updates
+# Docs: https://docs.github.com/code-security/dependabot
+
 version: 2
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Caracas"
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
       - "rust"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
     ignore:
       - dependency-name: "synapsis-core"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "monthly"
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Caracas"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    open-pull-requests-limit: 2
+    ignore:
+      # actions/checkout v7 breaks pull_request_target fork checkout
+      - dependency-name: "actions/checkout"
+        versions: [">=7"]
+      # Let major bumps be reviewed manually
+      - dependency-name: "actions/github-script"
+        versions: [">=8"]
+      - dependency-name: "actions/labeler"
+        versions: [">=6"]

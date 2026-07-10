@@ -5,9 +5,27 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 
+use crate::core::agent_registry_ext::AgentRegistryExt;
 use crate::core::antibrick::{AntiBrickConfig, AntiBrickEngine};
+use crate::core::auth::challenge::ChallengeResponse;
+use crate::core::auth::classifier::AgentClassifier;
+use crate::core::auth::permissions::{Permission, PermissionSet};
+use crate::core::auth::tpm::TpmMfaProvider;
+use crate::core::auto_integrate::AutoIntegrate;
+use crate::core::chunk_query::ChunkQueryManager;
+use crate::core::discovery::EnvironmentDiscovery;
 use crate::core::orchestrator::Orchestrator;
+use crate::core::recycle::RecycleBin;
+use crate::core::resource_manager::ResourceManager;
+use crate::core::session_manager::SessionManager;
+use crate::core::sync::GitSyncEngine;
+use crate::core::timeline_manager::TimelineManager;
+use crate::core::tool_registry::ToolRegistryState;
+use crate::core::vault::SecureVault;
 use crate::core::watchdog::FilesystemWatchdog;
+use crate::core::worker::{
+    CodeWorker, FileWorker, GitWorker, SearchWorker, ShellWorker, WorkerOrchestrator,
+};
 use crate::domain::*;
 use crate::infrastructure::agents::AgentRegistry;
 use crate::infrastructure::database::Database;
@@ -39,6 +57,20 @@ pub struct McpServer {
     orchestrator: Arc<Orchestrator>,
     antibrick: Arc<AntiBrickEngine>,
     watchdog: Arc<FilesystemWatchdog>,
+    recycle: RecycleBin,
+    agent_ext: AgentRegistryExt,
+    session_mgr: SessionManager,
+    timelines: TimelineManager,
+    chunks: ChunkQueryManager,
+    vault: SecureVault,
+    workers: WorkerOrchestrator,
+    git_sync: GitSyncEngine,
+    auto_integrate: AutoIntegrate,
+    tpm: TpmMfaProvider,
+    resources: ResourceManager,
+    classifier: Option<AgentClassifier>,
+    #[allow(dead_code)]
+    challenge: Option<ChallengeResponse>,
     sessions: std::sync::RwLock<HashMap<String, SessionInfo>>,
     messages: std::sync::Mutex<Vec<AgentMessage>>,
     next_msg_id: std::sync::atomic::AtomicI64,
@@ -62,8 +94,38 @@ pub struct AgentMessage {
 
 impl McpServer {
     pub fn new(db: Arc<Database>, orchestrator: Arc<Orchestrator>) -> Self {
+        let auth_enabled = std::env::var("SYNAPSIS_AUTH").is_ok();
         Self {
-            db,
+            db: db.clone(),
+            recycle: RecycleBin::new(crate::config::data_dir()),
+            agent_ext: AgentRegistryExt::new(db.clone()),
+            session_mgr: SessionManager::new(db.clone()),
+            timelines: TimelineManager::new(db.clone()),
+            chunks: ChunkQueryManager::new(db.clone()),
+            vault: SecureVault::new(crate::config::data_dir()),
+            workers: {
+                let mut wo = WorkerOrchestrator::new();
+                wo.register_worker(Arc::new(ShellWorker::new().with_antibrick(Arc::new(
+                    AntiBrickEngine::new(AntiBrickConfig::default()),
+                ))));
+                wo.register_worker(Arc::new(
+                    FileWorker::new().with_allowed_dirs(vec![std::path::PathBuf::from(".")]),
+                ));
+                wo.register_worker(Arc::new(CodeWorker::new()));
+                wo.register_worker(Arc::new(SearchWorker::new()));
+                wo.register_worker(Arc::new(GitWorker::new()));
+                wo
+            },
+            git_sync: GitSyncEngine::new(crate::core::sync::GitSyncConfig::default()),
+            auto_integrate: {
+                let discovery = Arc::new(EnvironmentDiscovery::new());
+                let registry = ToolRegistryState::new();
+                AutoIntegrate::new(discovery, registry)
+            },
+            tpm: TpmMfaProvider::new(),
+            resources: ResourceManager::new(),
+            classifier: auth_enabled.then(AgentClassifier::new),
+            challenge: auth_enabled.then(ChallengeResponse::new),
             skills: Arc::new(SkillRegistry::new()),
             agents: Arc::new(AgentRegistry::new()),
             orchestrator,
@@ -118,6 +180,20 @@ impl McpServer {
                 );
             }
         };
+
+        // Auth check: if SYNAPSIS_AUTH is set, require valid API key in initialize
+        if let Some(ref _classifier) = self.classifier {
+            let is_initialize = request["method"].as_str() == Some("initialize");
+            if !is_initialize {
+                let key = request["params"]["api_key"]
+                    .as_str()
+                    .or_else(|| request["params"]["token"].as_str())
+                    .unwrap_or("");
+                if key.is_empty() {
+                    return Some(json!({"jsonrpc":"2.0","id":&request["id"],"error":{"code":-32001,"message":"Authentication required. Pass api_key in params."}}).to_string());
+                }
+            }
+        }
 
         let is_tool_call = request["method"].as_str() == Some("tools/call");
         let tool_name = request["params"]["name"].as_str().unwrap_or("").to_string();
@@ -574,6 +650,437 @@ impl McpServer {
                     "name": "db_vacuum",
                     "description": "Reclaim unused space in the database (VACUUM).",
                     "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "mem_update",
+                    "description": "Update an existing observation's title and content.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "Observation ID" },
+                            "title": { "type": "string", "description": "New title" },
+                            "content": { "type": "string", "description": "New content" }
+                        },
+                        "required": ["id", "title", "content"]
+                    }
+                },
+                {
+                    "name": "mem_get_observation",
+                    "description": "Get a single observation by ID with full content.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "Observation ID" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "mem_judge",
+                    "description": "Record a judgment resolving a detected memory conflict.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "source_id": { "type": "integer", "description": "Source observation ID" },
+                            "target_id": { "type": "integer", "description": "Target observation ID" },
+                            "relation": { "type": "string", "enum": ["related","compatible","scoped","conflicts_with","supersedes","not_conflict"], "description": "Type of relation" },
+                            "reason": { "type": "string", "description": "Explanation" },
+                            "evidence": { "type": "string" },
+                            "confidence": { "type": "number", "default": 1.0 },
+                            "session_id": { "type": "string" },
+                            "project": { "type": "string" }
+                        },
+                        "required": ["source_id", "target_id", "relation"]
+                    }
+                },
+                {
+                    "name": "mem_compare",
+                    "description": "Directly compare two memories and record a semantic verdict.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "memory_id_a": { "type": "integer", "description": "First observation ID" },
+                            "memory_id_b": { "type": "integer", "description": "Second observation ID" },
+                            "relation": { "type": "string", "enum": ["related","compatible","scoped","conflicts_with","supersedes","not_conflict"] },
+                            "confidence": { "type": "number", "default": 1.0 },
+                            "reasoning": { "type": "string" },
+                            "model": { "type": "string" }
+                        },
+                        "required": ["memory_id_a", "memory_id_b", "relation"]
+                    }
+                },
+                {
+                    "name": "mem_session_start",
+                    "description": "Start a new memory session for tracking context across a work session.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "session_id": { "type": "string", "description": "Unique session identifier" },
+                            "project": { "type": "string" }
+                        }
+                    }
+                },
+                {
+                    "name": "mem_session_end",
+                    "description": "End a memory session with an optional summary.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "session_id": { "type": "string" },
+                            "summary": { "type": "string" }
+                        },
+                        "required": ["session_id"]
+                    }
+                },
+                {
+                    "name": "mem_session_summary",
+                    "description": "Get a summary of a session: observation count, first/last activity.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "session_id": { "type": "string" }
+                        }
+                    }
+                },
+                {
+                    "name": "mem_doctor",
+                    "description": "Run diagnostics on the Synapsis memory database.",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "mem_merge_projects",
+                    "description": "Merge all observations from one project into another.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "source": { "type": "string", "description": "Source project to merge from" },
+                            "target": { "type": "string", "description": "Target project to merge into" }
+                        },
+                        "required": ["source", "target"]
+                    }
+                },
+                {
+                    "name": "mem_current_project",
+                    "description": "Get observation count and context for a project.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string" }
+                        }
+                    }
+                },
+                {
+                    "name": "mem_audit_log",
+                    "description": "View the audit trail of observation changes (updates, deletes).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "limit": { "type": "integer", "default": 20 }
+                        }
+                    }
+                },
+                {
+                    "name": "mem_recycle_save",
+                    "description": "Save content to the recycle bin with a classification category.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string" },
+                            "category": { "type": "string", "enum": ["critical","sensitive","important","standard","ephemeral"], "default": "standard" }
+                        },
+                        "required": ["content"]
+                    }
+                },
+                {
+                    "name": "mem_recycle_search",
+                    "description": "Search recycled items by keyword and/or category.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "keyword": { "type": "string" },
+                            "category": { "type": "string", "enum": ["critical","sensitive","important","standard","ephemeral"] },
+                            "limit": { "type": "integer", "default": 20 },
+                            "offset": { "type": "integer", "default": 0 }
+                        }
+                    }
+                },
+                {
+                    "name": "mem_recycle_stats",
+                    "description": "Get recycle bin statistics (total items, expired, bytes).",
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "mem_recycle_delete",
+                    "description": "Permanently delete an item from the recycle bin by ID.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "agent_unregister",
+                    "description": "Unregister an agent (mark as inactive).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "agent_id": { "type": "string", "description": "Agent session ID" }
+                        },
+                        "required": ["agent_id"]
+                    }
+                },
+                {
+                    "name": "agent_list_by_project",
+                    "description": "List all agents in a specific project.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string" }
+                        },
+                        "required": ["project"]
+                    }
+                },
+                {
+                    "name": "chunk_query",
+                    "description": "Query context chunks by chunk_id or by project.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "chunk_id": { "type": "string", "description": "Chunk ID to look up" },
+                            "project": { "type": "string", "description": "Project key to list chunks" }
+                        }
+                    }
+                },
+                {
+                    "name": "vault_store",
+                    "description": "Store a secret in the secure vault.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "key": { "type": "string" },
+                            "value": { "type": "string" }
+                        },
+                        "required": ["key", "value"]
+                    }
+                },
+                {
+                    "name": "vault_retrieve",
+                    "description": "Retrieve a secret from the secure vault.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "key": { "type": "string" }
+                        },
+                        "required": ["key"]
+                    }
+                },
+                {
+                    "name": "worker_execute",
+                    "description": "Execute a task on a worker agent (shell, file, code, search, git).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "task_type": { "type": "string", "description": "shell, file_read, file_write, code_analysis, code_refactor, search, git" },
+                            "command": { "type": "string" },
+                            "path": { "type": "string" },
+                            "query": { "type": "string" },
+                            "skill": { "type": "string" }
+                        },
+                        "required": ["task_type"]
+                    }
+                },
+                {
+                    "name": "worker_status",
+                    "description": "List registered workers and external agents.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "sync_status",
+                    "description": "Get Git sync engine status (commits, pending changes, conflicts).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "auto_discover",
+                    "description": "Force a scan for available tools and auto-integrate them.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "auth_tpm_status",
+                    "description": "Check TPM availability for hardware-backed security.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "auth_tpm_attest",
+                    "description": "Generate a TPM attestation for a given nonce.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "nonce": { "type": "string" }
+                        },
+                        "required": ["nonce"]
+                    }
+                },
+                {
+                    "name": "auth_check_permission",
+                    "description": "Check if a trust level grants a specific permission.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "permission": { "type": "string", "description": "pqc_encrypt, pqc_decrypt, manage_agents, configure_security, read_recycle, write_recycle, admin, create_task, execute_task" },
+                            "trust_level": { "type": "string", "description": "all, trusted, basic, minimal, none" }
+                        },
+                        "required": ["permission"]
+                    }
+                },
+                {
+                    "name": "auth_classify_agent",
+                    "description": "Classify an agent by type and get its trust level (requires SYNAPSIS_AUTH).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "agent_type": { "type": "string" }
+                        },
+                        "required": ["agent_type"]
+                    }
+                },
+                {
+                    "name": "secure_write_file",
+                    "description": "Write data to a file securely.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "data": { "type": "string" }
+                        },
+                        "required": ["path", "data"]
+                    }
+                },
+                {
+                    "name": "secure_read_file",
+                    "description": "Read a file securely.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
+                    "name": "secure_list_dir",
+                    "description": "List directory contents securely.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" }
+                        }
+                    }
+                },
+                {
+                    "name": "secure_random",
+                    "description": "Generate a cryptographically secure random number (0 to max-1).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "max": { "type": "integer", "description": "Upper bound (exclusive), default 1000" }
+                        }
+                    }
+                },
+                {
+                    "name": "vault_session_key",
+                    "description": "Manage session keys in the secure vault (store, get, rotate, close).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "session_id": { "type": "string" },
+                            "action": { "type": "string", "description": "store, get, rotate, close" },
+                            "key_data": { "type": "string" }
+                        },
+                        "required": ["session_id", "action"]
+                    }
+                },
+                {
+                    "name": "vault_list_sessions",
+                    "description": "List all active session keys in the vault.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "sync_memory",
+                    "description": "Sync a memory observation to the Git sync engine.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "agent_id": { "type": "string" },
+                            "summary": { "type": "string" }
+                        },
+                        "required": ["summary"]
+                    }
+                },
+                {
+                    "name": "audit_log",
+                    "description": "Get audit trail for a specific observation.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "observation_id": { "type": "integer" }
+                        },
+                        "required": ["observation_id"]
+                    }
+                },
+                {
+                    "name": "resource_stats",
+                    "description": "Get system resource stats (CPU, memory, agents).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "resource_recommendations",
+                    "description": "Get agent-specific resource recommendations.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "agent_id": { "type": "string" }
+                        },
+                        "required": ["agent_id"]
+                    }
+                },
+                {
+                    "name": "orchestrator_tree",
+                    "description": "Get sub-agent tree for a given agent.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "agent_id": { "type": "string" }
+                        },
+                        "required": ["agent_id"]
+                    }
+                },
+                {
+                    "name": "orchestrator_idle",
+                    "description": "List idle agents available for task assignment.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
                 }
             ]}
         }))
@@ -587,9 +1094,26 @@ impl McpServer {
             "mem_save" | "memory_add" => tools::handle_mem_save(&self.db, id, args),
             "mem_search" | "memory_search" => tools::handle_mem_search(&self.db, id, args),
             "mem_context" => tools::handle_mem_context(&self.db, id, args),
-            "mem_timeline" | "memory_timeline" => tools::handle_mem_timeline(&self.db, id, args),
+            "mem_timeline" | "memory_timeline" => {
+                tools::handle_mem_timeline(&self.timelines, id, args)
+            }
             "mem_stats" | "memory_stats" => tools::handle_mem_stats(&self.db, id),
             "mem_delete" => tools::handle_mem_delete(&self.db, id, args),
+            "mem_update" => tools::handle_mem_update(&self.db, id, args),
+            "mem_get_observation" => tools::handle_mem_get_observation(&self.db, id, args),
+            "mem_judge" => tools::handle_mem_judge(&self.db, id, args),
+            "mem_compare" => tools::handle_mem_compare(&self.db, id, args),
+            "mem_session_start" => tools::handle_mem_session_start(&self.session_mgr, id, args),
+            "mem_session_end" => tools::handle_mem_session_end(&self.session_mgr, id, args),
+            "mem_session_summary" => tools::handle_mem_session_summary(&self.session_mgr, id, args),
+            "mem_doctor" => tools::handle_mem_doctor(&self.db, id),
+            "mem_merge_projects" => tools::handle_mem_merge_projects(&self.db, id, args),
+            "mem_current_project" => tools::handle_mem_current_project(&self.db, id, args),
+            "mem_audit_log" => tools::handle_mem_audit_log(&self.db, id, args),
+            "mem_recycle_save" => tools::handle_mem_recycle_save(&self.recycle, id, args),
+            "mem_recycle_search" => tools::handle_mem_recycle_search(&self.recycle, id, args),
+            "mem_recycle_stats" => tools::handle_mem_recycle_stats(&self.recycle, id),
+            "mem_recycle_delete" => tools::handle_mem_recycle_delete(&self.recycle, id, args),
             "ghost_audit" => tools::handle_ghost_audit(&self.orchestrator, id, args),
             "pqc_encrypt" => tools::handle_pqc_encrypt(id, args),
             "wasm_run" => tools::handle_wasm_run(id, args),
@@ -609,6 +1133,40 @@ impl McpServer {
             "skill_list" => tools::handle_skill_list(&self.skills, id),
             "agent_register" => tools::handle_agent_register(&self.agents, id, args),
             "agent_list" => tools::handle_agent_list(&self.agents, id),
+            "agent_unregister" => tools::handle_agent_unregister(&self.agent_ext, id, args),
+            "agent_list_by_project" => {
+                tools::handle_agent_list_by_project(&self.agent_ext, id, args)
+            }
+            "chunk_query" => tools::handle_chunk_query(&self.chunks, id, args),
+            "vault_store" => tools::handle_vault_store(&self.vault, id, args),
+            "vault_retrieve" => tools::handle_vault_retrieve(&self.vault, id, args),
+            "worker_execute" => tools::handle_worker_execute(&self.workers, id, args),
+            "worker_status" => tools::handle_worker_status(&self.workers, id),
+            "sync_status" => tools::handle_sync_status(&self.git_sync, id),
+            "auto_discover" => tools::handle_auto_discover(&self.auto_integrate, id),
+            "auth_tpm_status" => tools::handle_auth_tpm_status(&self.tpm, id),
+            "auth_tpm_attest" => tools::handle_auth_tpm_attest(&self.tpm, id, args),
+            "auth_check_permission" => tools::handle_auth_check_permission(id, args),
+            "secure_write_file" => tools::handle_secure_write_file(id, args),
+            "secure_read_file" => tools::handle_secure_read_file(id, args),
+            "secure_list_dir" => tools::handle_secure_list_dir(id, args),
+            "secure_random" => tools::handle_secure_random(id, args),
+            "vault_session_key" => tools::handle_vault_session_key(&self.vault, id, args),
+            "vault_list_sessions" => tools::handle_vault_list_sessions(&self.vault, id),
+            "sync_memory" => tools::handle_sync_memory(&self.git_sync, id, args),
+            "audit_log" => tools::handle_audit_log(id, args),
+            "resource_stats" => tools::handle_resource_stats(&self.resources, id),
+            "resource_recommendations" => {
+                tools::handle_resource_recommendations(&self.resources, id, args)
+            }
+            "orchestrator_tree" => tools::handle_orchestrator_tree(&self.orchestrator, id, args),
+            "orchestrator_idle" => tools::handle_orchestrator_idle(&self.orchestrator, id),
+            "auth_classify_agent" => match &self.classifier {
+                Some(c) => tools::handle_auth_classify_agent(c, id, args),
+                None => Ok(
+                    json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Auth not enabled (set SYNAPSIS_AUTH env var)"}}),
+                ),
+            },
             "task_create" => tools::handle_task_create(&self.orchestrator, id, args),
             "task_list" => tools::handle_task_list(&self.orchestrator, id),
             "mcp_call" => tools::handle_mcp_call(id, args),

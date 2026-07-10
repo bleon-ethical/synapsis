@@ -1,6 +1,6 @@
 [package]
 name = "synapsis"
-version = "0.7.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["methodwhite"]
 description = "Persistent memory engine for AI agents with PQC security"
@@ -8,9 +8,9 @@ license = "MIT"
 
 [features]
 default = []
-security = []
 db-encryption = ["rusqlite/sqlcipher"]
 tui = ["dep:crossterm", "dep:ratatui"]
+core = ["dep:synapsis-core"]
 
 [lib]
 name = "synapsis"
@@ -34,26 +34,27 @@ path = "src/bin/ollama.rs"
 
 [dependencies]
 # Core
+synapsis-core = { git = "https://github.com/MethodWhite/synapsis-core", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rusqlite = { version = "0.31", features = ["bundled", "blob", "serde_json"] }
-chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 anyhow = "1.0"
 base64 = "0.22"
 rand = "0.8"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"], default-features = false }
 uuid = { version = "1.0", features = ["v4", "fast-rng"] }
-hmac-sha1 = "0.2"
 
 # Session ID
 hostname = "0.4"
 getrandom = "0.2"
+hmac-sha1 = "0.2"  # TODO: migrate to hmac crate (SHA-1 deprecated)
 lazy_static = "1.4"
 hex = "0.4"
 
 # CLI
 regex = "1"
+url = "2"
 
 # Async
 tokio = { version = "1", features = ["full"] }
@@ -66,6 +67,11 @@ mdns-sd = "0.11"
 
 # System monitoring
 sysinfo = "0.38"
+
+# QUIC transport
+quinn = "0.11"
+rustls = "0.23"
+rcgen = "0.13"
 
 # TUI (optional)
 crossterm = { version = "0.28", optional = true }

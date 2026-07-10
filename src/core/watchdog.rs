@@ -256,12 +256,12 @@ impl FilesystemWatchdog {
 
         let modified = metadata
             .modified()
-            .map(|t| t.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
+            .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64)
             .unwrap_or(0);
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         Ok(FileSnapshot {
@@ -357,7 +357,9 @@ impl FilesystemWatchdog {
                 if let Ok(metadata) = fs::metadata(current_path) {
                     let current_modified = metadata
                         .modified()
-                        .map(|t| t.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
+                        .map(|t| {
+                            t.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+                        })
                         .unwrap_or(0);
 
                     if current_modified > original.modified {
@@ -418,7 +420,7 @@ impl FilesystemWatchdog {
         let id = self.event_counter.fetch_add(1, Ordering::SeqCst);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());

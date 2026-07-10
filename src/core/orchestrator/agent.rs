@@ -30,8 +30,7 @@ impl Orchestrator {
         self.resource_manager.register_agent(&id, None);
         for skill in &skills {
             self.skills_index
-                .lock()
-                .unwrap()
+                .lock_safe()
                 .entry(skill.clone())
                 .or_default()
                 .push(id.clone());
@@ -61,14 +60,10 @@ impl Orchestrator {
             sub_agents: Vec::new(),
             is_sub_orchestrator: false,
         };
-        self.agents
-            .lock()
-            .unwrap()
-            .insert(agent_id.to_string(), agent);
+        self.agents.lock_safe().insert(agent_id.to_string(), agent);
         for skill in &skills {
             self.skills_index
-                .lock()
-                .unwrap()
+                .lock_safe()
                 .entry(skill.clone())
                 .or_default()
                 .push(agent_id.to_string());
@@ -108,8 +103,7 @@ impl Orchestrator {
         drop(agents);
         for skill in &skills {
             self.skills_index
-                .lock()
-                .unwrap()
+                .lock_safe()
                 .entry(skill.clone())
                 .or_default()
                 .push(agent_id.to_string());
@@ -284,8 +278,7 @@ impl Orchestrator {
 
     pub fn get_idle_agents(&self) -> Vec<Agent> {
         self.agents
-            .lock()
-            .unwrap()
+            .lock_safe()
             .values()
             .filter(|a| a.status == AgentStatus::Idle)
             .cloned()
@@ -294,8 +287,7 @@ impl Orchestrator {
 
     pub fn get_agent_context(&self, agent_id: &str) -> Vec<serde_json::Value> {
         self.messages
-            .lock()
-            .unwrap()
+            .lock_safe()
             .iter()
             .filter(|m| m.from == agent_id || m.to.as_deref() == Some(agent_id))
             .rev()

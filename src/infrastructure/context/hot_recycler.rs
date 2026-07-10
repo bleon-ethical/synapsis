@@ -7,8 +7,9 @@
 //! - Mantiene el contexto coherente
 //! - Recicla partes no usadas frecuentemente
 
-use super::context::Context;
-use super::types::*;
+use super::context_types::now_ts as now_timestamp;
+use super::context_types::{Context, ContextId, ContextValue, Timestamp};
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -28,7 +29,7 @@ impl ChunkId {
         use std::time::{SystemTime, UNIX_EPOCH};
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_nanos();
         Self(format!("chunk_{:x}", ts))
     }
@@ -234,7 +235,13 @@ impl HotRecycler {
 
         // 2. Variables (si hay)
         if !context.variables.is_empty() {
-            let vars_json = serde_json::to_string(&context.variables).unwrap_or_default();
+            let vars_json = serde_json::to_string(&context.variables).unwrap_or_else(|e| {
+                eprintln!(
+                    "[Synapsis] Warning: failed to serialize context variables: {}",
+                    e
+                );
+                String::new()
+            });
             if vars_json.len() <= self.config.max_chunk_size {
                 chunks.push((ChunkType::Core, vars_json));
             } else {
@@ -384,12 +391,20 @@ impl HotRecycler {
 
     /// Registra acceso a un chunk y actualiza score
     pub fn touch_chunk(&mut self, id: &ChunkId) {
+        let (access_count, last_access) = if let Some(chunk) = self.active_chunks.get(id) {
+            (chunk.access_count + 1, now_timestamp())
+        } else {
+            return;
+        };
+        let relevance = if let Some(chunk) = self.active_chunks.get(id) {
+            self.calculate_relevance(chunk)
+        } else {
+            return;
+        };
         if let Some(chunk) = self.active_chunks.get_mut(id) {
-            chunk.access_count += 1;
-            chunk.last_access = now_timestamp();
-
-            // Actualizar relevancia basada en tipo
-            chunk.relevance_score = self.calculate_relevance(chunk);
+            chunk.access_count = access_count;
+            chunk.last_access = last_access;
+            chunk.relevance_score = relevance;
         }
     }
 
@@ -439,8 +454,9 @@ impl HotRecycler {
         }
 
         // Limpiar chunks huérfanos
+        let active_keys: Vec<_> = self.active_chunks.keys().cloned().collect();
         self.context_chunks.retain(|_ctx_id, chunk_ids| {
-            chunk_ids.retain(|id| self.active_chunks.contains_key(id));
+            chunk_ids.retain(|id| active_keys.contains(id));
             !chunk_ids.is_empty()
         });
 

@@ -1,3 +1,4 @@
+use crate::core::retry::CircuitBreaker;
 use crate::presentation::mcp::McpServer;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -5,11 +6,15 @@ use std::sync::Arc;
 
 pub struct HttpTransport {
     server: Arc<McpServer>,
+    circuit: CircuitBreaker,
 }
 
 impl HttpTransport {
     pub fn new(server: Arc<McpServer>) -> Self {
-        Self { server }
+        Self {
+            server,
+            circuit: CircuitBreaker::new(10, 60),
+        }
     }
 
     pub fn start(&self, port: u16) {
@@ -20,6 +25,13 @@ impl HttpTransport {
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
+                    if !self.circuit.is_closed() {
+                        eprintln!("[HTTP] Circuit open - rejecting connection");
+                        let resp = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+                        let mut stream = stream;
+                        let _ = stream.write_all(resp.as_bytes());
+                        continue;
+                    }
                     let server = self.server.clone();
                     std::thread::spawn(move || {
                         handle_connection(stream, &server);
@@ -32,7 +44,11 @@ impl HttpTransport {
 }
 
 fn handle_connection(mut stream: TcpStream, server: &McpServer) {
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let cloned = match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut reader = BufReader::new(cloned);
 
     let mut request_line = String::new();
     if reader.read_line(&mut request_line).is_err() {
@@ -45,7 +61,6 @@ fn handle_connection(mut stream: TcpStream, server: &McpServer) {
     }
     let method = parts[0];
     let path = parts[1];
-
     let mut content_length: usize = 0;
 
     loop {
@@ -58,7 +73,7 @@ fn handle_connection(mut stream: TcpStream, server: &McpServer) {
             let key = line[..pos].trim().to_lowercase();
             let value = line[pos + 1..].trim().to_string();
             if key == "content-length" {
-                content_length = value.parse().unwrap_or(0);
+                content_length = value.parse().unwrap_or(0).min(10_000_000);
             }
         }
     }
@@ -75,6 +90,11 @@ fn handle_connection(mut stream: TcpStream, server: &McpServer) {
             }
         }
         ("POST", "/") | ("POST", "/message") => {
+            if content_length > 10_000_000 {
+                let resp = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(resp.as_bytes());
+                return;
+            }
             let mut body = vec![0u8; content_length];
             let _ = reader.read_exact(&mut body);
             let body_str = String::from_utf8_lossy(&body);

@@ -4,13 +4,10 @@ pub mod agent;
 pub mod antibrick;
 pub mod auth;
 pub mod auto_integrate;
-pub mod concurrency;
-pub mod concurrency_advanced;
 pub mod discovery;
 pub mod discovery_net;
 pub mod lock_utils;
 pub mod orchestrator;
-pub mod passive_capture;
 pub mod pqc;
 pub mod rate_limiter;
 pub mod recycle;
@@ -28,14 +25,11 @@ pub mod worker;
 pub use agent::*;
 pub use auth::*;
 pub use auto_integrate::*;
-pub use concurrency::*;
-pub use concurrency_advanced::*;
 pub use discovery::*;
 pub use orchestrator::{
     Agent, AgentStatus, LegacyFile, MessageType, Orchestrator, OrchestratorMessage, ReviewStatus,
     Task as OrchestratorTask, TaskStatus as OrchestratorTaskStatus,
 };
-pub use passive_capture::*;
 pub use pqc::*;
 pub use rate_limiter::*;
 pub use recycle::*;
@@ -57,5 +51,4 @@ pub mod providers;
 pub mod session_id;
 pub mod session_manager;
 pub mod task_cleanup;
-pub mod terminal_writer;
 pub mod timeline_manager;
