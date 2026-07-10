@@ -108,7 +108,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-         tool: cargo-geiger
+          tool: cargo-geiger
       - name: Run geiger analysis
         run: |
           cargo geiger --output-format GitHub --update-readme || true
