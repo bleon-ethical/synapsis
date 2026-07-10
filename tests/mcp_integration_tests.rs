@@ -524,10 +524,12 @@ mod mcp_tests {
 
         let resp_json: serde_json::Value = serde_json::from_str(&response.unwrap()).unwrap();
         assert!(resp_json["error"].is_object(), "Should return error");
-        assert!(resp_json["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Invalid JSON"));
+        assert!(
+            resp_json["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid JSON")
+        );
     }
 
     #[test]
