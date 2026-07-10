@@ -115,18 +115,12 @@ mod mcp_tests {
             .collect();
 
         assert!(tool_names.contains(&"mem_save"), "Should have mem_save");
-        assert!(
-            tool_names.contains(&"mem_search"),
-            "Should have mem_search"
-        );
+        assert!(tool_names.contains(&"mem_search"), "Should have mem_search");
         assert!(
             tool_names.contains(&"mem_timeline"),
             "Should have mem_timeline"
         );
-        assert!(
-            tool_names.contains(&"mem_stats"),
-            "Should have mem_stats"
-        );
+        assert!(tool_names.contains(&"mem_stats"), "Should have mem_stats");
         assert!(
             tool_names.contains(&"skill_register"),
             "Should have skill_register"
